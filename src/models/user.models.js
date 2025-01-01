@@ -15,6 +15,8 @@ users [icon: user] {
  */
 
 import mongoose, { Schema } from "mongoose";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcrypt";
 
 const userSchema = new Schema(
   {
@@ -23,14 +25,14 @@ const userSchema = new Schema(
       required: true,
       unique: true,
       lowercase: true,
-      trim: true, //all extra spaces are removed
-      index: true, //indexing is done
+      trim: true,
+      index: true,
     },
     email: {
       type: String,
       required: true,
       unique: true,
-      lowercase: true,
+      lowecase: true,
       trim: true,
     },
     fullName: {
@@ -49,21 +51,64 @@ const userSchema = new Schema(
     watchHistory: [
       {
         type: Schema.Types.ObjectId,
-        ref: "Video", //referencing what u export in the other model, not the file name neither the schema
+        ref: "Video",
       },
     ],
     password: {
       type: String,
-      required: [true, "Password is required"], // controlling the error message
+      required: [true, "Password is required"],
     },
     refreshToken: {
       type: String,
     },
   },
-  //another object is made.
   {
-    timestamps: true, // this gives the the db the data of createdAt and updatedAt
+    timestamps: true,
   }
 );
+
+//using the pre hook to trigger the event before saving.
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next(); //skip the rest if no modification.
+  this.password = await bcrypt.hash(this.password, 10); //this refers to that particular object, 10 signifies number of rounds.
+  next(); //pass it on to next hook, standard procedure
+});
+
+//defining a method which is part of the schema as well.
+userSchema.methods.isPasswordCorrect = async function (password) {
+  return await bcrypt.compare(password, this.password); //bcrypt does the comparison on its own, await is necessary as it takes time.
+};
+
+//using jwt tokens, stateless encoding service
+
+//generateAccessToken, no harm in using async await
+
+//format : jwt.sign({payload},'secret',{expires in});
+userSchema.methods.generateAccessToken = function () {
+  return jwt.sign(
+    {
+      _id: this._id,
+      email: this.email,
+      username: this.username,
+      fullName: this.fullName,
+    },
+    process.env.ACCESS_TOKEN_SECRET,
+    {
+      expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+    }
+  );
+};
+
+userSchema.methods.generateRefreshToken = function () {
+  return jwt.sign(
+    {
+      _id: this._id,
+    },
+    process.env.REFRESH_TOKEN_SECRET,
+    {
+      expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
+    }
+  );
+};
 
 export const User = mongoose.model("User", userSchema);
