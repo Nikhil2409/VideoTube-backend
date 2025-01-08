@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 
 const app = express();
 
+//check if mac is being used
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN,
