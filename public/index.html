@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Profile</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        .profile-container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            display: inline-block;
+            text-align: left;
+            min-width: 300px;
+        }
+        img {
+            border-radius: 50%;
+            margin-top: 10px;
+        }
+        p {
+            font-size: 18px;
+            color: #333;
+        }
+        input, button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>User Profile</h1>
+    
+    <input type="text" id="userId" placeholder="Enter User ID">
+    <button onclick="fetchUserProfile()">Get Profile</button>
+    
+    <div class="profile-container" id="user-data">Enter a User ID and click "Get Profile"</div>
+
+    <script>
+        function fetchUserProfile() {
+            const userId = document.getElementById("userId").value.trim();
+            if (!userId) {
+                alert("Please enter a valid User ID.");
+                return;
+            }
+
+            document.getElementById("user-data").innerHTML = "Loading...";
+            
+            fetch(`http://localhost:3900/api/v1/users/${userId}`)
+                .then(res => {
+                    if (!res.ok) {
+                        throw new Error("User not found.");
+                    }
+                    return res.json();
+                })
+                .then(data => {
+                    document.getElementById("user-data").innerHTML = `
+                        <p><strong>Name:</strong> ${data.data.fullName}</p>
+                        <p><strong>Email:</strong> ${data.data.email}</p>
+                        <img src="${data.data.avatar}" width="100" alt="User Avatar" />
+                    `;
+                })
+                .catch(err => {
+                    document.getElementById("user-data").innerHTML = "<p style='color: red;'>Failed to load user data.</p>";
+                    console.error(err);
+                });
+        }
+    </script>
+</body>
+</html>
