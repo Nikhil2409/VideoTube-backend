@@ -8,8 +8,7 @@ dotenv.config({ path: "./src/.env" });
 
 const morganFormat = ":method :url :status :response-time ms";
 
-//const app = express();
-const port = process.env.PORT || 3050;
+const port = process.env.PORT || 3900;
 
 app.use(
   morgan(morganFormat, {

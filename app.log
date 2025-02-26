@@ -1,0 +1,16 @@
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"404\",\"responseTime\":\"0.936\"}","timestamp":"2025-02-26T18:26:15.354Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"404\",\"responseTime\":\"0.773\"}","timestamp":"2025-02-26T18:26:17.441Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"404\",\"responseTime\":\"0.676\"}","timestamp":"2025-02-26T18:26:23.510Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/favicon.ico\",\"status\":\"404\",\"responseTime\":\"1.628\"}","timestamp":"2025-02-26T18:27:16.277Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/users\",\"status\":\"404\",\"responseTime\":\"0.815\"}","timestamp":"2025-02-26T18:27:33.387Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users\",\"status\":\"404\",\"responseTime\":\"0.625\"}","timestamp":"2025-02-26T18:28:22.338Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users\",\"status\":\"404\",\"responseTime\":\"2.575\"}","timestamp":"2025-02-26T18:29:53.102Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users\",\"status\":\"404\",\"responseTime\":\"0.777\"}","timestamp":"2025-02-26T18:29:54.032Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users\",\"status\":\"404\",\"responseTime\":\"0.801\"}","timestamp":"2025-02-26T18:29:54.539Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users\",\"status\":\"404\",\"responseTime\":\"0.450\"}","timestamp":"2025-02-26T18:29:54.896Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users/register\",\"status\":\"404\",\"responseTime\":\"1.109\"}","timestamp":"2025-02-26T18:30:57.433Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users/register\",\"status\":\"404\",\"responseTime\":\"0.263\"}","timestamp":"2025-02-26T18:31:23.081Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users/register\",\"status\":\"404\",\"responseTime\":\"0.845\"}","timestamp":"2025-02-26T19:19:04.136Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users/67bf68d105219e91e4777136\",\"status\":\"404\",\"responseTime\":\"1.795\"}","timestamp":"2025-02-26T19:29:00.025Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/api/v1/users/67bf68d105219e91e4777136\",\"status\":\"404\",\"responseTime\":\"0.221\"}","timestamp":"2025-02-26T19:31:07.850Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/favicon.ico\",\"status\":\"404\",\"responseTime\":\"1.035\"}","timestamp":"2025-02-26T19:33:37.548Z"}
