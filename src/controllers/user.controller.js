@@ -82,4 +82,67 @@ const getUser = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
 });
 
-export { registerUser, getUser };
+
+const loginUser = asyncHandler(async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        console.log("Login attempt with username:", username);
+
+        if (!username) {
+            throw new ApiError(400, "Username is required");
+        }
+        
+        const user = await User.findOne({ username });
+
+        if (!user) {
+            throw new ApiError(404, "User does not exist");
+        }
+
+        const isPasswordValid = await user.isPasswordCorrect(password);
+
+        if (!isPasswordValid) {
+            throw new ApiError(401, "Invalid user credentials");
+        }
+
+        // Use the methods available on the user instance
+        const accessToken = user.generateAccessToken();
+        const refreshToken = user.generateRefreshToken();
+        
+        // Save the refresh token to the user document
+        user.refreshToken = refreshToken;
+        await user.save({ validateBeforeSave: false });
+
+        const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+
+        // Modified cookie options for local development
+        const options = {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production" // Only use secure in production
+        };
+
+        return res
+            .status(200)
+            .cookie("accessToken", accessToken, options)
+            .cookie("refreshToken", refreshToken, options)
+            .json(
+                new ApiResponse(
+                    200, 
+                    {
+                        user: loggedInUser, accessToken, refreshToken
+                    },
+                    "User logged In Successfully"
+                )
+            );
+    } catch (error) {
+        console.error("Login error:", error);
+        return res.status(error.statusCode || 500).json(
+            new ApiResponse(
+                error.statusCode || 500, 
+                null, 
+                error.message || "Login failed"
+            )
+        );
+    }
+});
+
+export { registerUser, getUser, loginUser };

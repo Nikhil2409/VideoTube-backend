@@ -1,22 +1,9 @@
-/*
-users [icon: user] {
-  id string pk
-  username string
-  email string
-  fullName string
-  avatar string
-  coverImage string
-  watchHistory ObjectId[] videos
-  password string
-  refreshToken string
-  createdAt Date
-  updatedAt Date
-}
- */
-
 import mongoose, { Schema } from "mongoose";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const userSchema = new Schema(
   {
@@ -31,7 +18,7 @@ const userSchema = new Schema(
       type: String,
       required: true,
       unique: true,
-      lowecase: true,
+      lowercase: true,
       trim: true,
     },
     fullName: {
@@ -80,9 +67,6 @@ userSchema.methods.isPasswordCorrect = async function (password) {
 
 //using jwt tokens, stateless encoding service
 
-//generateAccessToken, no harm in using async await
-
-//format : jwt.sign({payload},'secret',{expires in});
 userSchema.methods.generateAccessToken = function () {
   return jwt.sign(
     {
@@ -91,9 +75,9 @@ userSchema.methods.generateAccessToken = function () {
       username: this.username,
       fullName: this.fullName,
     },
-    process.env.ACCESS_TOKEN_SECRET,
+    process.env.ACCESS_TOKEN_SECRET || "fallback-access-secret-key",
     {
-      expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+      expiresIn: process.env.ACCESS_TOKEN_EXPIRY || "1d", // Added fallback
     }
   );
 };
@@ -103,9 +87,9 @@ userSchema.methods.generateRefreshToken = function () {
     {
       _id: this._id,
     },
-    process.env.REFRESH_TOKEN_SECRET,
+    process.env.REFRESH_TOKEN_SECRET || "fallback-refresh-secret-key",
     {
-      expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
+      expiresIn: process.env.REFRESH_TOKEN_EXPIRY || "7d", // Added fallback
     }
   );
 };
