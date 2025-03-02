@@ -11,14 +11,15 @@ cloudinary.config({
   secure: true, // Ensures HTTPS upload
 });
 
-export const uploadOnCloudinary = async (filePath) => {
+export const uploadOnCloudinary = async (filePath, type = "image") => {
   try {
     if (!filePath) throw new Error("File path is required");
 
-    console.log("Uploading file:", filePath); // ✅ Log file path
+    console.log("Uploading file:", filePath);
 
     const result = await cloudinary.uploader.upload(filePath, {
       folder: "videoTube",
+      resource_type: type, 
     });
 
     console.log("Cloudinary Upload Success:", result.secure_url);
