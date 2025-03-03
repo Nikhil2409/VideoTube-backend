@@ -9,7 +9,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 // Get channel statistics
 const getChannelStats = asyncHandler(async (req, res) => {
   const { userId } = req.params;
-
+ 
   try {
     const totalVideos = await Video.countDocuments({ uploader: userId });
 
@@ -49,7 +49,7 @@ const getChannelVideos = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
 
   try {
-    const videos = await Video.find({ uploader: userId })
+    const videos = await Video.find({ owner: userId })
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(parseInt(limit));
