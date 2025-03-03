@@ -1,8 +1,9 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
-import uploadOnCloudinary from "../utils/cloudinary.js";
+import {uploadOnCloudinary} from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/apiResponse.js";
-
+import { ApiError} from "../utils/ApiError.js";
+import mongoose from "mongoose";
 const generateAccessAndRefereshTokens = async (userId) => {
   try {
     const user = await User.findById(userId);
@@ -469,6 +470,31 @@ const getWatchHistory = asyncHandler(async (req, res) => {
     );
 });
 
+const getUser = asyncHandler(async (req, res) => {
+  const { _id } = req.params;
+  
+  // Validate ID format to prevent errors
+  if (!mongoose.Types.ObjectId.isValid(_id)) {
+    res.status(400);
+    throw new Error('Invalid user ID format');
+  }
+  
+  const user = await User.findById(_id);
+  
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+  
+  // Return only necessary user data (for security)
+  res.status(200).json({
+    _id: user._id,
+    username: user.username,
+    fullName: user.fullName,
+    avatar: user.avatar
+  });
+});
+
 export {
   registerUser,
   loginUser,
@@ -481,4 +507,5 @@ export {
   updateUserCoverImage,
   getUserChannelProfile,
   getWatchHistory,
+  getUser
 };

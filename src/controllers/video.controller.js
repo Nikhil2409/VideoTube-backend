@@ -6,6 +6,10 @@ import { Video } from "../models/video.model.js";
 import fs from "fs";
 import path from "path";
 import {User} from "../models/user.model.js"
+import {Like} from "../models/like.model.js"
+import { Subscription } from "../models/subscription.model.js";
+import { Comment } from "../models/comment.model.js";
+import { cloudinary } from "../utils/cloudinary.js";
 
 const getAllVideos = asyncHandler(async (req, res) => {
   const videos = await Video.find({ isPublished: true })
@@ -16,6 +20,20 @@ const getAllVideos = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, videos, "Videos fetched successfully"));
 });
 
+const incrementViewCount = asyncHandler(async(req,res) => {
+  const {videotitle} = req.params;
+  try{
+    const video = await Video.findOneAndUpdate(
+    { title: videotitle }, 
+    { $inc: { views: 1 } }, 
+    { new: true }
+  );
+return res
+.status(200)
+.json(new ApiResponse(200, "Incremented Successfully"));  
+  }catch(err){
+    return res.status(400).json(new ApiError(400,"Error incrementing"));  }
+})
 const publishAVideo = asyncHandler(async (req, res) => {
   const { title, description } = req.body;
 
@@ -105,8 +123,78 @@ const getDashboardVideos = asyncHandler(async (req, res) => {
 
 
 const getVideoById = asyncHandler(async (req, res) => {
-  const { videoId } = req.params;
-  //TODO: get video by id
+  const { title } = req.params;
+  
+  if (!title) {
+    throw new ApiError(400, "Video title is required");
+  }
+
+  try {
+    // Find the video by title in your database
+    const video = await Video.findOne({ title })
+      .populate("owner", "username fullName avatar subscribersCount");
+
+    if (!video) {
+      throw new ApiError(404, "Video not found");
+    }
+
+    // Since comments are not directly referenced in the video schema,
+    // we need to query them separately
+    const comments = await Comment.find({ video: video._id })
+      .populate("owner", "username fullName avatar");
+      
+    // Get all likes for this video
+    const likes = await Like.find({ video: video._id })
+      .populate("likedBy", "username fullName avatar");
+
+    // Default response object
+    const videoResponse = {
+      ...video._doc,
+      comments,
+      likes,
+      likesCount: likes.length,
+      isLiked: false,
+      owner: {
+        ...video.owner._doc,
+        isSubscribed: false
+      }
+    };
+
+    // Check if user is authenticated and update like/subscription status
+    if (req.user) {
+      // Check if the current user has liked this video
+      const likeExists = await Like.findOne({
+        video: video._id,
+        likedBy: req.user._id
+      });
+      videoResponse.isLiked = !!likeExists;
+
+      // Check if user is subscribed to the video owner
+      const subscription = await Subscription.findOne({
+        channel: video.owner._id,
+        subscriber: req.user._id
+      });
+      
+      // Update isSubscribed property
+      videoResponse.owner.isSubscribed = !!subscription;
+    }
+
+    // Get the actual video URL if it's a Cloudinary ID rather than a full URL
+    if (video.videoFile && !video.videoFile.startsWith('http')) {
+      videoResponse.videoFile = cloudinary.url(video.videoFile, {
+        resource_type: "video",
+        secure: true
+      });
+    }
+
+    // Return the video with all necessary information
+    return res
+      .status(200)
+      .json(new ApiResponse(200, videoResponse, "Video fetched successfully"));
+      
+  } catch (error) {
+    throw new ApiError(500, error?.message || "Failed to fetch video");
+  }
 });
 
 const updateVideo = asyncHandler(async (req, res) => {
@@ -158,6 +246,7 @@ const ownedBy = asyncHandler(async (req, res) => {
 });
 
 export {
+  incrementViewCount,
   getAllVideos,
   publishAVideo,
   getVideoById,

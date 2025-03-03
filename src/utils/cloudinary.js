@@ -64,4 +64,5 @@ export const uploadOnCloudinary = async (filePath, resourceType = "image") => {
   }
 };
 
-export default uploadOnCloudinary;
+// Export both the function and the cloudinary instance
+export { cloudinary };

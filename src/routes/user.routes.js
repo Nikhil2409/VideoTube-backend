@@ -11,6 +11,7 @@ import {
   getUserChannelProfile,
   getWatchHistory,
   updateAccountDetails,
+  getUser,
 } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -46,7 +47,7 @@ router.route("/update-account").patch(
   ]),
   updateAccountDetails
 );
-
+router.route("/:_id").get(getUser);
 router
   .route("/avatar")
   .patch(verifyJWT, upload.single("avatar"), updateUserAvatar);
