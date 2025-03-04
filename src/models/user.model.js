@@ -65,33 +65,4 @@ userSchema.methods.isPasswordCorrect = async function (password) {
   return await bcrypt.compare(password, this.password); //bcrypt does the comparison on its own, await is necessary as it takes time.
 };
 
-//using jwt tokens, stateless encoding service
-
-userSchema.methods.generateAccessToken = function () {
-  return jwt.sign(
-    {
-      _id: this._id,
-      email: this.email,
-      username: this.username,
-      fullName: this.fullName,
-    },
-    process.env.ACCESS_TOKEN_SECRET || "fallback-access-secret-key",
-    {
-      expiresIn: process.env.ACCESS_TOKEN_EXPIRY || "1d", // Added fallback
-    }
-  );
-};
-
-userSchema.methods.generateRefreshToken = function () {
-  return jwt.sign(
-    {
-      _id: this._id,
-    },
-    process.env.REFRESH_TOKEN_SECRET || "fallback-refresh-secret-key",
-    {
-      expiresIn: process.env.REFRESH_TOKEN_EXPIRY || "7d", // Added fallback
-    }
-  );
-};
-
 export const User = mongoose.model("User", userSchema);

@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URL")
+}
+
+model User {
+  id                String         @id @default(auto()) @map("_id") @db.ObjectId
+  username          String         @unique
+  email             String         @unique
+  fullName          String   
+  password          String
+  refreshToken      String?
+  avatar            String
+  coverImage        String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  watchHistory      Video[]        @relation("UserWatchHistory", fields: [watchHistoryIds], references: [id])
+  watchHistoryIds   String[]       @db.ObjectId
+  videos            Video[]        @relation("UserVideos")
+  comments          Comment[]      @relation("UserComments")
+  likes             Like[]         @relation("UserLikes")
+  tweets            Tweet[]        @relation("UserTweets")
+  playlists         Playlist[]     @relation("UserPlaylists")
+  subscribedTo      Subscription[] @relation("UserSubscribedTo")
+  subscribers       Subscription[] @relation("UserSubscribers")
+
+  @@map("users")
+}
+
+model Video {
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  title        String
+  description  String
+  videoFile    String
+  thumbnail    String
+  duration     Int
+  views        Int        @default(0)
+  isPublished  Boolean    @default(true)
+  owner        String     @db.ObjectId
+  user         User       @relation("UserVideos", fields: [owner], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  comments     Comment[]  @relation("VideoComments")
+  likes        Like[]     @relation("VideoLikes")
+  watchedBy    User[]     @relation("UserWatchHistory", fields: [watchedByIds], references: [id])
+  watchedByIds String[]   @db.ObjectId
+  playlists    Playlist[] @relation("PlaylistVideos", fields: [playlistIds], references: [id])
+  playlistIds  String[]   @db.ObjectId
+
+  @@map("videos")
+}
+
+model Comment {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  content   String
+  videoId   String?  @db.ObjectId
+  video     Video?   @relation("VideoComments", fields: [videoId], references: [id])
+  userId    String   @db.ObjectId
+  user      User     @relation("UserComments", fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  likes     Like[]   @relation("CommentLikes")
+
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  videoId   String?  @db.ObjectId
+  video     Video?   @relation("VideoLikes", fields: [videoId], references: [id])
+  commentId String?  @db.ObjectId
+  comment   Comment? @relation("CommentLikes", fields: [commentId], references: [id])
+  tweetId   String?  @db.ObjectId
+  tweet     Tweet?   @relation("TweetLikes", fields: [tweetId], references: [id])
+  likedBy   String   @db.ObjectId
+  user      User     @relation("UserLikes", fields: [likedBy], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("likes")
+}
+
+model Tweet {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  content   String
+  owner     String   @db.ObjectId
+  user      User     @relation("UserTweets", fields: [owner], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  likes     Like[]   @relation("TweetLikes")
+
+  @@map("tweets")
+}
+
+model Playlist {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  description String
+  owner       String   @db.ObjectId
+  user        User     @relation("UserPlaylists", fields: [owner], references: [id])
+  videos      Video[]  @relation("PlaylistVideos", fields: [videoIds], references: [id])
+  videoIds    String[] @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("playlists")
+}
+
+model Subscription {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  subscriber   User     @relation("UserSubscribedTo", fields: [subscriberId], references: [id])
+  subscriberId String   @db.ObjectId
+  channel      User     @relation("UserSubscribers", fields: [channelId], references: [id])
+  channelId    String   @db.ObjectId
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([subscriberId, channelId])
+  @@map("subscriptions")
+}

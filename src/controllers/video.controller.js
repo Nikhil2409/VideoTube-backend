@@ -2,38 +2,61 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
-import { Video } from "../models/video.model.js";
 import fs from "fs";
 import path from "path";
-import {User} from "../models/user.model.js"
-import {Like} from "../models/like.model.js"
-import { Subscription } from "../models/subscription.model.js";
-import { Comment } from "../models/comment.model.js";
 import { cloudinary } from "../utils/cloudinary.js";
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
 
 const getAllVideos = asyncHandler(async (req, res) => {
-  const videos = await Video.find({ isPublished: true })
-    .sort({ createdAt: -1 });
+  const videos = await prisma.video.findMany({
+    where: {
+      isPublished: true
+    },
+    orderBy: {
+      createdAt: 'desc'
+    }
+  });
 
   return res
     .status(200)
     .json(new ApiResponse(200, videos, "Videos fetched successfully"));
 });
 
-const incrementViewCount = asyncHandler(async(req,res) => {
-  const {videotitle} = req.params;
-  try{
-    const video = await Video.findOneAndUpdate(
-    { title: videotitle }, 
-    { $inc: { views: 1 } }, 
-    { new: true }
-  );
-return res
-.status(200)
-.json(new ApiResponse(200, "Incremented Successfully"));  
-  }catch(err){
-    return res.status(400).json(new ApiError(400,"Error incrementing"));  }
-})
+const incrementViewCount = asyncHandler(async(req, res) => {
+  const { videoId } = req.params;
+  
+  try {
+    const video = await prisma.video.update({
+      where: {
+        id: videoId
+      },
+      data: {
+        views: {
+          increment: 1
+        }
+      }
+    });
+    
+    if (!video) {
+      throw new ApiError(404, "Video not found");
+    }
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, video, "View count incremented successfully"));  
+  } catch(err) {
+    if (err.code === 'P2023') {
+      throw new ApiError(400, "Invalid video ID format");
+    }
+    if (err.code === 'P2025') {
+      throw new ApiError(404, "Video not found");
+    }
+    throw new ApiError(500, err?.message || "Error incrementing view count");
+  }
+});
+
 const publishAVideo = asyncHandler(async (req, res) => {
   const { title, description } = req.body;
 
@@ -68,19 +91,19 @@ const publishAVideo = asyncHandler(async (req, res) => {
       throw new ApiError(500, "Error uploading files to cloudinary");
     }
 
-    // Get video information from cloudinary response
-    // Since our uploadOnCloudinary now returns just the URL, we'll need to estimate duration
-    // In a production app, you would use FFmpeg or Cloudinary's API to get actual duration
-    const duration = 0; // Default to 0 or implement a way to get actual duration
+    // Default to 0 or implement a way to get actual duration
+    const duration = 0;
 
-    // Create video in database
-    const video = await Video.create({
-      videoFile: videoFileUrl,
-      thumbnail: thumbnailUrl,
-      title,
-      description,
-      duration,
-      owner: req.user?._id // Assuming you have authentication middleware
+    // Create video in database using Prisma
+    const video = await prisma.video.create({
+      data: {
+        videoFile: videoFileUrl,
+        thumbnail: thumbnailUrl,
+        title,
+        description,
+        duration,
+        owner: req.user?.id,
+      }
     });
 
     // Check if video was created
@@ -104,75 +127,99 @@ const publishAVideo = asyncHandler(async (req, res) => {
   }
 });
 
-// Add a new controller to get videos for dashboard
-const getDashboardVideos = asyncHandler(async (req, res) => {
-  // Get videos for the logged-in user
-  const userId = req.user?._id;
-  
-  if (!userId) {
-    throw new ApiError(401, "Unauthorized access");
-  }
-  
-  const videos = await Video.find({ owner: userId })
-    .sort({ createdAt: -1 });
-    
-  return res
-    .status(200)
-    .json(new ApiResponse(200, videos, "Dashboard videos fetched successfully"));
-});
-
-
 const getVideoById = asyncHandler(async (req, res) => {
-  const { title } = req.params;
+  const { videoId } = req.params;
   
-  if (!title) {
-    throw new ApiError(400, "Video title is required");
+  if (!videoId) {
+    throw new ApiError(400, "Video ID is required");
   }
 
   try {
-    // Find the video by title in your database
-    const video = await Video.findOne({ title })
-      .populate("owner", "username fullName avatar subscribersCount");
+    // Find the video by ID using Prisma - change "owner" to "user"
+    const video = await prisma.video.findUnique({
+      where: {
+        id: videoId
+      },
+      include: {
+        user: {  // Changed from "owner" to "user" to match your schema
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true,
+            subscribers: { // We'll count these later
+              select: {
+                id: true
+              }
+            }
+          }
+        },
+        comments: {
+          include: {
+            user: {  // Changed from "owner" to "user"
+              select: {
+                id: true,
+                username: true,
+                fullName: true,
+                avatar: true
+              }
+            }
+          }
+        },
+        likes: {
+          include: {
+            user: {  // Changed from "likedBy" to "user"
+              select: {
+                id: true,
+                username: true,
+                fullName: true,
+                avatar: true
+              }
+            }
+          }
+        }
+      }
+    });
 
     if (!video) {
       throw new ApiError(404, "Video not found");
     }
 
-    // Since comments are not directly referenced in the video schema,
-    // we need to query them separately
-    const comments = await Comment.find({ video: video._id })
-      .populate("owner", "username fullName avatar");
-      
-    // Get all likes for this video
-    const likes = await Like.find({ video: video._id })
-      .populate("likedBy", "username fullName avatar");
+    // Process the user data to match your expected format
+    const ownerData = {
+      id: video.user.id,
+      username: video.user.username,
+      fullName: video.user.fullName,
+      avatar: video.user.avatar,
+      subscribersCount: video.user.subscribers.length,
+      isSubscribed: false
+    };
 
     // Default response object
     const videoResponse = {
-      ...video._doc,
-      comments,
-      likes,
-      likesCount: likes.length,
+      ...video,
+      comments: video.comments,
+      likes: video.likes,
+      likesCount: video.likes.length,
       isLiked: false,
-      owner: {
-        ...video.owner._doc,
-        isSubscribed: false
-      }
+      owner: ownerData  // Replace user with owner in the response
     };
+
+    // Remove the user property since we've added owner
+    delete videoResponse.user;
 
     // Check if user is authenticated and update like/subscription status
     if (req.user) {
       // Check if the current user has liked this video
-      const likeExists = await Like.findOne({
-        video: video._id,
-        likedBy: req.user._id
-      });
-      videoResponse.isLiked = !!likeExists;
+      const likeExists = video.likes.some(like => like.user.id === req.user.id);
+      videoResponse.isLiked = likeExists;
 
       // Check if user is subscribed to the video owner
-      const subscription = await Subscription.findOne({
-        channel: video.owner._id,
-        subscriber: req.user._id
+      const subscription = await prisma.subscription.findFirst({
+        where: {
+          channelId: video.user.id,
+          subscriberId: req.user.id
+        }
       });
       
       // Update isSubscribed property
@@ -193,27 +240,178 @@ const getVideoById = asyncHandler(async (req, res) => {
       .json(new ApiResponse(200, videoResponse, "Video fetched successfully"));
       
   } catch (error) {
+    if (error.code === 'P2023') {
+      throw new ApiError(400, "Invalid video ID format");
+    }
     throw new ApiError(500, error?.message || "Failed to fetch video");
   }
 });
-
 const updateVideo = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
-  //TODO: update video details like title, description, thumbnail
+  const { title, description } = req.body;
+  
+  if (!videoId) {
+    throw new ApiError(400, "Video ID is required");
+  }
+  
+  try {
+    // Check if video exists and belongs to user
+    const existingVideo = await prisma.video.findUnique({
+      where: {
+        id: videoId
+      }
+    });
+    
+    if (!existingVideo) {
+      throw new ApiError(404, "Video not found");
+    }
+    
+    if (existingVideo.owner !== req.user.id) {
+      throw new ApiError(403, "You are not authorized to update this video");
+    }
+    
+    // Handle thumbnail update if provided
+    let thumbnailUrl = existingVideo.thumbnail;
+    
+    if (req.files && req.files.thumbnail && req.files.thumbnail[0]) {
+      const thumbnailLocalPath = req.files.thumbnail[0].path;
+      const newThumbnail = await uploadOnCloudinary(thumbnailLocalPath, "image");
+      
+      if (newThumbnail) {
+        thumbnailUrl = newThumbnail;
+      }
+    }
+    
+    // Update video in database
+    const updatedVideo = await prisma.video.update({
+      where: {
+        id: videoId
+      },
+      data: {
+        title: title || existingVideo.title,
+        description: description || existingVideo.description,
+        thumbnail: thumbnailUrl
+      }
+    });
+    
+    return res
+      .status(200)
+      .json(new ApiResponse(200, updatedVideo, "Video updated successfully"));
+  } catch (error) {
+    if (error.code === 'P2023') {
+      throw new ApiError(400, "Invalid video ID format");
+    }
+    throw new ApiError(500, error?.message || "Failed to update video");
+  }
 });
 
 const deleteVideo = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
-  //TODO: delete video
+  
+  if (!videoId) {
+    throw new ApiError(400, "Video ID is required");
+  }
+  
+  try {
+    // Check if video exists and belongs to user
+    const existingVideo = await prisma.video.findUnique({
+      where: {
+        id: videoId
+      }
+    });
+    
+    if (!existingVideo) {
+      throw new ApiError(404, "Video not found");
+    }
+    
+    if (existingVideo.owner !== req.user.id) {
+      throw new ApiError(403, "You are not authorized to delete this video");
+    }
+    
+    // Delete associated records first to maintain referential integrity
+    // Delete comments
+    await prisma.comment.deleteMany({
+      where: {
+        videoId: videoId
+      }
+    });
+    
+    // Delete likes
+    await prisma.like.deleteMany({
+      where: {
+        videoId: videoId
+      }
+    });
+    
+    // Delete video
+    await prisma.video.delete({
+      where: {
+        id: videoId
+      }
+    });
+    
+    return res
+      .status(200)
+      .json(new ApiResponse(200, {}, "Video deleted successfully"));
+  } catch (error) {
+    if (error.code === 'P2023') {
+      throw new ApiError(400, "Invalid video ID format");
+    }
+    throw new ApiError(500, error?.message || "Failed to delete video");
+  }
 });
 
 const togglePublishStatus = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
+  
+  if (!videoId) {
+    throw new ApiError(400, "Video ID is required");
+  }
+  
+  try {
+    // Check if video exists and belongs to user
+    const existingVideo = await prisma.video.findUnique({
+      where: {
+        id: videoId
+      }
+    });
+    
+    if (!existingVideo) {
+      throw new ApiError(404, "Video not found");
+    }
+    
+    if (existingVideo.owner!== req.user.id) {
+      throw new ApiError(403, "You are not authorized to modify this video");
+    }
+    
+    // Toggle publish status
+    const updatedVideo = await prisma.video.update({
+      where: {
+        id: videoId
+      },
+      data: {
+        isPublished: !existingVideo.isPublished
+      }
+    });
+    
+    return res
+      .status(200)
+      .json(new ApiResponse(
+        200, 
+        updatedVideo, 
+        `Video ${updatedVideo.isPublished ? 'published' : 'unpublished'} successfully`
+      ));
+  } catch (error) {
+    if (error.code === 'P2023') {
+      throw new ApiError(400, "Invalid video ID format");
+    }
+    throw new ApiError(500, error?.message || "Failed to toggle publish status");
+  }
 });
 
 const ownedBy = asyncHandler(async (req, res) => {
   const { username } = req.params;
-  console.log(username);
+  
   if (!username?.trim()) {
     return res.status(400).json({
       success: false,
@@ -221,28 +419,48 @@ const ownedBy = asyncHandler(async (req, res) => {
     });
   }
   
-  const user = await User.findOne({ username });
-  
-  if (!user) {
-    return res.status(404).json({
-      success: false,
-      message: "User not found"
+  try {
+    const user = await prisma.user.findUnique({
+      where: {
+        username: username
+      }
     });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+    
+    const videos = await prisma.video.findMany({ 
+      where: {
+        owner: user.id,
+        isPublished: true
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+    
+    return res.status(200).json({
+      success: true,
+      videos: videos.length ? videos : [],
+      message: videos.length ? undefined : "No videos found for this user"
+    });
+  } catch (error) {
+    throw new ApiError(500, error?.message || "Failed to fetch user videos");
   }
-  
-  const videos = await Video.find({ 
-    owner: user._id, 
-    isPublished: true 
-  })
-    .select("videoFile thumbnail title description duration views createdAt")
-    .populate("owner", "username fullName avatar")
-    .sort({ createdAt: -1 });
-  
-  return res.status(200).json({
-    success: true,
-    videos: videos.length ? videos : [],
-    message: videos.length ? undefined : "No videos found for this user"
-  });
 });
 
 export {
@@ -254,5 +472,4 @@ export {
   deleteVideo,
   togglePublishStatus,
   ownedBy,
-  getDashboardVideos
 };
