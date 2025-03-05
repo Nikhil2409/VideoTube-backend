@@ -8,6 +8,7 @@ const prisma = new PrismaClient();
 const toggleVideoLike = asyncHandler(async (req, res) => {
   try {
     const { videoId } = req.params;
+    const userId = req.user.id;  // Ensure we use .id consistently
     
     if (!videoId) {
       throw new ApiError(400, "Video ID is required");
@@ -22,30 +23,29 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Video not found");
     }
     
-    // Check if video is already liked - use the field names from your schema
-    const isAlreadyLiked = await prisma.like.findFirst({
+    // Check if video is already liked
+    const existingLike = await prisma.like.findFirst({
       where: {
-        likedBy: req.user.id,  // Use .id not ._id
-        videoId: videoId       // Match the field name in your schema
+        likedBy: userId,
+        videoId: videoId
       }
     });
     
-    if (isAlreadyLiked) {
-      // Use the singular "like" to match your model name
+    if (existingLike) {
+      // Unlike - remove the like
       await prisma.like.delete({
-        where: { id: isAlreadyLiked.id }
+        where: { id: existingLike.id }
       });
       
       return res.status(200).json(
         new ApiResponse(200, { liked: false }, "Unliked successfully")
       );
     } else {
+      // Like - create new like
       const like = await prisma.like.create({
         data: {
-          likedBy: req.user.id,   // Use .id not ._id
-          videoId: videoId,        // Match the field name in your schema
-          // Prisma adds createdAt/updatedAt automatically if you've defined them with @default(now()) and @updatedAt
-          // No need to add v: 0 unless that's a field in your model
+          likedBy: userId,
+          videoId: videoId
         }
       });
       
@@ -64,6 +64,7 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
 const toggleCommentLike = asyncHandler(async (req, res) => {
   try {
     const { commentId } = req.params;
+    const userId = req.user.id;  // Ensure we use .id consistently
     
     if (!commentId) {
       throw new ApiError(400, "Comment ID is required");
@@ -77,16 +78,17 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Comment not found");
     }
     
-    const isAlreadyLiked = await prisma.like.findFirst({
+    const existingLike = await prisma.like.findFirst({
       where: {
-        likedBy: req.user._id,
-        comment: commentId
+        likedBy: userId,
+        commentId: commentId
       }
     });
     
-    if (isAlreadyLiked) {
-      await prisma.likes.delete({
-        where: { id: isAlreadyLiked.id }
+    if (existingLike) {
+      // Unlike - remove the like
+      await prisma.like.delete({
+        where: { id: existingLike.id }
       });
       
       return res.status(200).json(
@@ -95,11 +97,8 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
     } else {
       const like = await prisma.like.create({
         data: {
-          likedBy: req.user._id,
-          comment: commentId,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          v: 0
+          likedBy: userId,
+          commentId: commentId
         }
       });
       
@@ -118,6 +117,7 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
 const toggleTweetLike = asyncHandler(async (req, res) => {
   try {
     const { tweetId } = req.params;
+    const userId = req.user.id;  // Ensure we use .id consistently
     
     if (!tweetId) {
       throw new ApiError(400, "Tweet ID is required");
@@ -131,29 +131,28 @@ const toggleTweetLike = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Tweet not found");
     }
     
-    const isAlreadyLiked = await prisma.like.findFirst({
+    const existingLike = await prisma.like.findFirst({
       where: {
-        likedBy: req.user._id,
-        tweet: tweetId
+        likedBy: userId,
+        tweetId: tweetId
       }
     });
     
-    if (isAlreadyLiked) {
-      await prisma.likes.delete({
-        where: { id: isAlreadyLiked.id }
+    if (existingLike) {
+      // Unlike - remove the like
+      await prisma.like.delete({
+        where: { id: existingLike.id }
       });
       
       return res.status(200).json(
         new ApiResponse(200, { liked: false }, "Unliked successfully")
       );
     } else {
+      // Like - create new like
       const like = await prisma.like.create({
         data: {
-          likedBy: req.user._id,
-          tweet: tweetId,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          v: 0
+          likedBy: userId,
+          tweetId: tweetId
         }
       });
       
@@ -174,25 +173,29 @@ const getLikedVideos = asyncHandler(async (req, res) => {
     // Get all likes by the user that have a video reference
     const likedVideos = await prisma.like.findMany({
       where: { 
-        likedBy: req.user._id,
-        NOT: { video: null }
+        likedBy: req.user.id,
+        NOT: { videoId: null }
       },
       include: {
-        videos: {
+        video: {
           select: {
-            id: true,
-            title: true,
-            description: true,
-            thumbnail: true,
+            id :true,        
+            title :true,       
+            description:true,  
+            videoFile :true,   
+            thumbnail :true,   
+            duration  :true,   
             views: true,
-            duration: true
+            duration: true,
+            videoFile:true,
+            createdAt: true,
           }
         }
       }
     });
     
     const formattedVideos = likedVideos
-      .map(like => like.videos)
+      .map(like => like.video)
       .filter(Boolean);
     
     return res.status(200).json(

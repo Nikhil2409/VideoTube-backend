@@ -6,8 +6,9 @@ import {
     publishAVideo,
     togglePublishStatus,
     updateVideo,
-    ownedBy,
-    incrementViewCount
+    ownedById,
+    incrementViewCount,
+    ownedByName
 } from "../controllers/video.controller.js"
 import {verifyJWT} from "../middlewares/auth.middleware.js"
 import {upload} from "../middlewares/multer.middleware.js"
@@ -40,7 +41,8 @@ router
     .get(getVideoById); 
 
 router.route("/incrementViews/:videoId").patch(incrementViewCount);
-router.route("/user/:username").get(ownedBy);
+router.route("/user/id/:userId").get(ownedById);
+router.route("/user/:username").get(ownedByName);
 
 router.route("/toggle/publish/:videoId").patch(togglePublishStatus);
 

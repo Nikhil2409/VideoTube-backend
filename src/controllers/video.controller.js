@@ -6,8 +6,23 @@ import fs from "fs";
 import path from "path";
 import { cloudinary } from "../utils/cloudinary.js";
 import { PrismaClient } from '@prisma/client';
-
+import ffmpeg from 'fluent-ffmpeg';
 const prisma = new PrismaClient();
+
+const getVideoDuration = (videoPath) => {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      // Duration is in seconds
+      const duration = metadata.format.duration;
+      resolve(Math.round(duration)); // Round to nearest second
+    });
+  });
+};
 
 const getAllVideos = asyncHandler(async (req, res) => {
   const videos = await prisma.video.findMany({
@@ -83,6 +98,9 @@ const publishAVideo = asyncHandler(async (req, res) => {
   }
 
   try {
+    // Get video duration before uploading
+    const duration = await getVideoDuration(videoLocalPath);
+
     // Upload to cloudinary with correct resource types
     const videoFileUrl = await uploadOnCloudinary(videoLocalPath, "video");
     const thumbnailUrl = await uploadOnCloudinary(thumbnailLocalPath, "image");
@@ -91,9 +109,6 @@ const publishAVideo = asyncHandler(async (req, res) => {
       throw new ApiError(500, "Error uploading files to cloudinary");
     }
 
-    // Default to 0 or implement a way to get actual duration
-    const duration = 0;
-
     // Create video in database using Prisma
     const video = await prisma.video.create({
       data: {
@@ -101,7 +116,7 @@ const publishAVideo = asyncHandler(async (req, res) => {
         thumbnail: thumbnailUrl,
         title,
         description,
-        duration,
+        duration, // Now we have the actual duration
         owner: req.user?.id,
       }
     });
@@ -126,6 +141,7 @@ const publishAVideo = asyncHandler(async (req, res) => {
     throw new ApiError(500, error.message || "Failed to upload video");
   }
 });
+
 
 const getVideoById = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
@@ -202,7 +218,8 @@ const getVideoById = asyncHandler(async (req, res) => {
       likes: video.likes,
       likesCount: video.likes.length,
       isLiked: false,
-      owner: ownerData  // Replace user with owner in the response
+      owner: ownerData,
+      createdAt: video.createdAt
     };
 
     // Remove the user property since we've added owner
@@ -409,7 +426,60 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
   }
 });
 
-const ownedBy = asyncHandler(async (req, res) => {
+const ownedById = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  
+  if (!userId?.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: "User ID is required"
+    });
+  }
+  
+  try {
+    const user = await prisma.user.findUnique({
+      where: {
+        id: userId
+      }
+    });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+    
+    const videos = await prisma.video.findMany({ 
+      where: {
+        owner: userId,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+    
+    return res.status(200).json({
+      success: true,
+      videos: videos.length ? videos : [],
+      message: videos.length ? undefined : "No videos found for this user"
+    });
+  } catch (error) {
+    throw new ApiError(500, error?.message || "Failed to fetch user videos");
+  }
+});
+
+const ownedByName = asyncHandler(async (req, res) => {
   const { username } = req.params;
   
   if (!username?.trim()) {
@@ -471,5 +541,6 @@ export {
   updateVideo,
   deleteVideo,
   togglePublishStatus,
-  ownedBy,
+  ownedById,
+  ownedByName
 };

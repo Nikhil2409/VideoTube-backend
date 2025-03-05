@@ -102,3 +102,8 @@
 {"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.189\"}","timestamp":"2025-03-04T08:08:16.160Z"}
 {"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.371\"}","timestamp":"2025-03-04T08:09:32.803Z"}
 {"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.296\"}","timestamp":"2025-03-04T08:09:38.386Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/favicon.ico\",\"status\":\"404\",\"responseTime\":\"2.206\"}","timestamp":"2025-03-04T19:06:21.291Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.955\"}","timestamp":"2025-03-04T19:09:22.727Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.333\"}","timestamp":"2025-03-04T19:09:28.265Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.183\"}","timestamp":"2025-03-04T19:10:46.324Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"PATCH\",\"url\":\"/api/v1/users/change-password\",\"status\":\"404\",\"responseTime\":\"0.304\"}","timestamp":"2025-03-04T19:12:07.844Z"}

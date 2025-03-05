@@ -18,7 +18,8 @@ class UserTokenService {
         fullName: user.fullName,
         watchHistoryIds: user.watchHistoryIds || [], 
         role: 'user', // Default role
-        profileVerified: false, // Default verification status
+        profileVerified: false, // Default verification status,
+        likes: user.likes || [],
       },
       process.env.ACCESS_TOKEN_SECRET || "fallback-access-secret-key",
       {
