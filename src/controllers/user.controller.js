@@ -6,8 +6,86 @@ import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt"; // You'll need this for password hashing
 import UserTokenService from "../utils/Auth.utils.js"
+import {inspectUserData, deleteSpecificUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
+
 
 const prisma = new PrismaClient();
+
+const deleteSpecificData = async (req, res) => {
+  try {
+    const { userId, dataType } = req.body
+    console.log(userId);
+    console.log(dataType);
+    if (!userId || !dataType) {
+      return res.status(400).json({ 
+        message: 'User ID and Data Type are required' 
+      })
+    }
+    const deletionResult = await prisma[dataType].deleteMany({
+      where: { owner: userId },
+    });
+
+    res.status(200).json({
+      message: `${dataType} deleted successfully`,
+      details: deletionResult
+    })
+  } catch (error) {
+    console.error('Delete Specific Data Error:', error)
+    res.status(500).json({ 
+      message: `Failed to delete ${req.body.dataType}`,
+      error: error.message
+    })
+  }
+}
+
+const clearWatchHistory = async (req,res) => {
+  try{
+    const  { userId } = req.body;
+    
+    const response = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        watchHistoryIds: []
+      }
+    });
+
+    res.status(200).json({
+      message:"Watch History cleared successfully"
+    });
+  }catch(error){
+    console.error('Delete Specific Data Error:', error)
+    res.status(500).json({ 
+      message: `Failed to clear watch history`,
+      error: error.message
+    })
+  }
+}
+
+const inspectData = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ 
+        message: 'User ID is required' 
+      });
+    }
+    const database = await getDatabaseName();
+    const userDataSummary = await inspectUserData(userId);
+
+    res.status(200).json({
+      message: 'User data summary retrieved',
+      data: userDataSummary,
+      message:'Database name is :',
+      data : data
+    });
+  } catch (error) {
+    console.error('Inspect User Data Error:', error);
+    res.status(500).json({ 
+      message: 'Failed to retrieve user data summary' 
+    });
+  }
+};
 
 const generateAccessAndRefereshTokens = async (userId) => {
   try {
@@ -558,7 +636,7 @@ const getUser = asyncHandler(async (req, res) => {
 
 const addToWatchHistory = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
-  const userId = req.user?.id;
+    const userId = req.user?.id;
 
   // Validate input
   if (!videoId || !userId) {
@@ -597,7 +675,7 @@ const addToWatchHistory = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     console.error("Error adding video to watch history:", error);
-    res.status(500).json({
+    res.status(500).json({ 
       success: false,
       message: "Failed to add video to watch history",
       error: error.message
@@ -619,5 +697,8 @@ export {
   getUserChannelProfile,
   getWatchHistory,
   getUser,
-  addToWatchHistory
+  addToWatchHistory,
+  inspectData,
+  deleteSpecificData,
+  clearWatchHistory
 };
