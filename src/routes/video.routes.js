@@ -8,7 +8,8 @@ import {
     updateVideo,
     ownedById,
     incrementViewCount,
-    ownedByName
+    ownedByName,
+    getVideosNotInPlaylist
 } from "../controllers/video.controller.js"
 import {verifyJWT} from "../middlewares/auth.middleware.js"
 import {upload} from "../middlewares/multer.middleware.js"
@@ -43,6 +44,7 @@ router
 router.route("/incrementViews/:videoId").patch(incrementViewCount);
 router.route("/user/id/:userId").get(ownedById);
 router.route("/user/:username").get(ownedByName);
+router.route('/user/:userId/not-in-playlist/:playlistId').get(getVideosNotInPlaylist);
 
 router.route("/toggle/publish/:videoId").patch(togglePublishStatus);
 

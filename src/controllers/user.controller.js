@@ -21,9 +21,16 @@ const deleteSpecificData = async (req, res) => {
         message: 'User ID and Data Type are required' 
       })
     }
-    const deletionResult = await prisma[dataType].deleteMany({
+    let deletionResult = 0;
+    if(dataType === "watchHistory"){
+    deletionResult = await prisma[dataType].deleteMany({
+        where: { userId : userId },
+    });
+    }else{
+    deletionResult = await prisma[dataType].deleteMany({
       where: { owner: userId },
     });
+  }
 
     res.status(200).json({
       message: `${dataType} deleted successfully`,
@@ -33,29 +40,6 @@ const deleteSpecificData = async (req, res) => {
     console.error('Delete Specific Data Error:', error)
     res.status(500).json({ 
       message: `Failed to delete ${req.body.dataType}`,
-      error: error.message
-    })
-  }
-}
-
-const clearWatchHistory = async (req,res) => {
-  try{
-    const  { userId } = req.body;
-    
-    const response = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        watchHistoryIds: []
-      }
-    });
-
-    res.status(200).json({
-      message:"Watch History cleared successfully"
-    });
-  }catch(error){
-    console.error('Delete Specific Data Error:', error)
-    res.status(500).json({ 
-      message: `Failed to clear watch history`,
       error: error.message
     })
   }
@@ -578,42 +562,11 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     );
 });
 
-const getWatchHistory = asyncHandler(async (req, res) => {
-  // Get watch history with videos and their owners
-  const user = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    include: {
-      watchHistory: {
-        include: {
-          owner: {
-            select: {
-              id: true,
-              fullName: true,
-              username: true,
-              avatar: true
-            }
-          }
-        }
-      }
-    }
-  });
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        user.watchHistory || [],
-        "Watch history fetched successfully"
-      )
-    );
-});
-
 const getUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
   
   // Check if ID is valid
-  if (!id || id.length !== 24) {
+  if (!id) {
     throw new ApiError(400, 'Invalid user ID format');
   }
   
@@ -634,53 +587,137 @@ const getUser = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
 });
 
-const addToWatchHistory = asyncHandler(async (req, res) => {
-  const { videoId } = req.params;
-    const userId = req.user?.id;
-
-  // Validate input
-  if (!videoId || !userId) {
-    return res.status(400).json({
-      success: false,
-      message: "Video ID and User ID are required"
+const clearUserWatchHistory = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Delete all watch history entries for this user
+    const deletedEntries = await prisma.watchHistory.deleteMany({
+      where: { userId }
     });
+
+    return res.status(200).json(
+      new ApiResponse(
+        200, 
+        { count: deletedEntries.count }, 
+        "Watch history cleared successfully"
+      )
+    );
+  } catch (error) {
+    console.error('Clear Watch History Error:', error);
+    throw new ApiError(500, "Failed to clear watch history");
+  }
+});
+
+const getUserWatchHistory = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  
+  // Get user's watch history with video details and channel info
+  const watchHistory = await prisma.watchHistory.findMany({
+    where: { 
+      userId,
+      video: {
+        isPublished: true
+      } 
+    },
+    orderBy: { watchedAt: 'desc' },
+    include: {
+      video: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              fullName: true,
+              avatar: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      watchHistory,
+      "Watch history fetched successfully"
+    )
+  );
+});
+
+const createWatchHistoryEntry = asyncHandler(async (req, res) => {
+  const { videoId } = req.params;
+  const userId = req.user.id;
+
+  // Validate videoId
+  if (!videoId) {
+    throw new ApiError(400, "Video ID is required");
   }
 
-  try {
-    // First, verify the video exists
-    const video = await prisma.video.findUnique({
-      where: { id: videoId }
-    });
+  // Check if video exists
+  const video = await prisma.video.findUnique({
+    where: { id: videoId }
+  });
 
-    if (!video) {
-      return res.status(404).json({
-        success: false,
-        message: "Video not found"
-      });
+  if (!video) {
+    throw new ApiError(404, "Video not found");
+  }
+
+  // Check if entry already exists
+  const existingEntry = await prisma.watchHistory.findUnique({
+    where: {
+      userId_videoId: {
+        userId,
+        videoId
+      }
     }
+  });
 
-    // Update user's watch history by pushing the video ID
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        watchHistoryIds: {
-          push: videoId
+  if (existingEntry) {
+    // Update existing entry instead of creating a new one
+    const updatedEntry = await prisma.watchHistory.update({
+      where: {
+        userId_videoId: {
+          userId,
+          videoId
         }
+      },
+      data: {
+        watchedAt: new Date() // Update the watched time to now
       }
     });
 
-    res.status(200).json({
-      success: true,
-      message: "Video added to watch history"
-    });
-  } catch (error) {
-    console.error("Error adding video to watch history:", error);
-    res.status(500).json({ 
-      success: false,
-      message: "Failed to add video to watch history",
-      error: error.message
-    });
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        updatedEntry,
+        "Watch history entry updated"
+      )
+    );
   }
+
+  // Create new watch history entry
+  const watchHistoryEntry = await prisma.watchHistory.create({
+    data: {
+      userId,
+      videoId
+    }
+  });
+
+  // Increment video views if this is a new view
+  await prisma.video.update({
+    where: { id: videoId },
+    data: { views: { increment: 1 } }
+  });
+
+  return res.status(201).json(
+    new ApiResponse(
+      201,
+      watchHistoryEntry,
+      "Added to watch history"
+    )
+  );
 });
 
 
@@ -695,10 +732,10 @@ export {
   updateUserAvatar,
   updateUserCoverImage,
   getUserChannelProfile,
-  getWatchHistory,
   getUser,
-  addToWatchHistory,
   inspectData,
   deleteSpecificData,
-  clearWatchHistory
+  getUserWatchHistory,
+  createWatchHistoryEntry,
+  clearUserWatchHistory
 };

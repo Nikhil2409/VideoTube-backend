@@ -58,7 +58,9 @@ const getVideoComments = asyncHandler(async (req, res) => {
 const addComment = asyncHandler(async (req, res) => {
   const { videoId, text } = req.body;
   const userId = req.user.id;
-
+  console.log(videoId);
+  console.log(text);
+  console.log(req.user.id);
   if (!videoId || !text) {
     return res
       .status(400)
@@ -79,7 +81,7 @@ const addComment = asyncHandler(async (req, res) => {
       data: { 
         videoId, 
         userId,
-        text,
+        content : text,
       },
       include: {
         user: {
@@ -185,4 +187,89 @@ const deleteComment = asyncHandler(async (req, res) => {
   }
 });
 
-export { getVideoComments, addComment, updateComment, deleteComment };
+const getAllVideoComments = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+
+  // Validate userId
+  if (!userId) {
+    return res
+      .status(400)
+      .json({ success: false, message: "User ID is required" });
+  }
+
+  try {
+    // Find all comments made by the user with prisma
+    const comments = await prisma.comment.findMany({
+      where: {
+        userId: userId
+      },
+      select: {
+        id: true,
+        content: true,
+        createdAt: true,
+        updatedAt: true,
+        videoId: true,
+        // Include related video data
+        video: {
+          select: {
+            id: true,
+            title: true,
+            thumbnail: true,
+            duration: true,
+            views: true
+          }
+        },
+        // Include user data (this was missing)
+        user: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true
+          }
+        },
+        // Include likes data
+        likes: {
+          select: {
+            id: true,
+            likedBy: true,
+            createdAt: true,
+            user: {
+              select: {
+                id: true,
+                username: true,
+                fullName: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc' // Sort by newest first
+      }
+    });
+
+    // Count the total number of comments
+    const totalComments = await prisma.comment.count({
+      where: {
+        userId: userId
+      }
+    });
+
+    // Return the comments with success status
+    return res.status(200).json({
+      success: true,
+      data: {
+        comments,
+        totalComments
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching user comments:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch user comments" });
+  }
+});
+
+export { getVideoComments, addComment, updateComment, deleteComment, getAllVideoComments };

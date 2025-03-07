@@ -346,6 +346,14 @@ const deleteVideo = asyncHandler(async (req, res) => {
     }
     
     // Delete associated records first to maintain referential integrity
+    
+    // Delete from all users' watch history
+    await prisma.watchHistory.deleteMany({
+      where: {
+        videoId: videoId
+      }
+    });
+    
     // Delete comments
     await prisma.comment.deleteMany({
       where: {
@@ -533,6 +541,82 @@ const ownedByName = asyncHandler(async (req, res) => {
   }
 });
 
+const getVideosNotInPlaylist = async (req, res) => {
+  try {
+    const { userId, playlistId } = req.params;
+    
+    // Verify user has access to this playlist
+    const playlist = await prisma.playlist.findUnique({
+      where: { id: playlistId },
+      include: {
+        videos: true,
+      },
+    });
+
+    if (!playlist) {
+      return res.status(404).json({
+        success: false,
+        message: 'Playlist not found'
+      });
+    }
+    
+    // Check if user owns the playlist or has access to it
+    const isOwner = playlist.owner === userId;
+
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized access to this playlist'
+      });
+    }
+    
+    // Get all video IDs in the playlist
+    const videoIdsInPlaylist = playlist.videos.map(video => video.id);
+    
+    // Find all videos owned by the user that are not in the playlist
+    const videos = await prisma.video.findMany({
+      where: {
+        owner: userId,
+        id: {
+          notIn: videoIdsInPlaylist,
+        },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,  // Changed from name to fullName based on your schema
+          }
+        },
+      },
+    });
+    
+    // Format the response to match the expected structure
+    const formattedVideos = videos.map(video => ({
+      id: video.id,
+      title: video.title,
+      thumbnail: video.thumbnail,
+      owner: video.user.fullName,  // Use fullName from your schema
+      duration: video.duration,
+      createdAt: video.createdAt
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        videos: formattedVideos,
+        count: formattedVideos.length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching videos not in playlist:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while fetching videos',
+      error: error.message
+    });
+  }
+};
 export {
   incrementViewCount,
   getAllVideos,
@@ -542,5 +626,6 @@ export {
   deleteVideo,
   togglePublishStatus,
   ownedById,
-  ownedByName
+  ownedByName,
+  getVideosNotInPlaylist
 };

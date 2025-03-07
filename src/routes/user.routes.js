@@ -1,21 +1,21 @@
 import { Router } from "express";
 import {
+  registerUser,
   loginUser,
   logoutUser,
-  registerUser,
   refreshAccessToken,
   changeCurrentPassword,
   getCurrentUser,
+  updateAccountDetails,
   updateUserAvatar,
   updateUserCoverImage,
   getUserChannelProfile,
-  getWatchHistory,
-  updateAccountDetails,
   getUser,
-  addToWatchHistory,
   inspectData,
   deleteSpecificData,
-  clearWatchHistory
+  getUserWatchHistory,
+  createWatchHistoryEntry,
+  clearUserWatchHistory
 } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -40,7 +40,6 @@ router.route("/login").post(loginUser);
 
 //secured routes
 //router.post('/delete-all-data', verifyJWT, deleteAllData);]
-router.post('/deleteWatchHistory', verifyJWT, clearWatchHistory);
 router.post('/inspect-data', verifyJWT, inspectData);
 router.post('/delete-specific-data', verifyJWT, deleteSpecificData)
 router.route("/logout").post(verifyJWT, logoutUser);
@@ -55,15 +54,15 @@ router.route("/update-account").patch(
   ]),
   updateAccountDetails
 );
-router.route("/:id").get(getUser);
+router.route("/getUser/:id").get(getUser);
 router
   .route("/avatar")
   .patch(verifyJWT, upload.single("avatar"), updateUserAvatar);
 router
   .route("/cover-image")
   .patch(verifyJWT, upload.single("coverImage"), updateUserCoverImage);
-router.route("/addToWatchHistory/:videoId").post(verifyJWT, addToWatchHistory)
+router.route("/addToWatchHistory/:videoId").post(verifyJWT, createWatchHistoryEntry)
 router.route("/c/:username").get(verifyJWT, getUserChannelProfile);
-router.route("/history").get(verifyJWT, getWatchHistory);
+router.route("/history").get(verifyJWT, getUserWatchHistory);
 
 export default router;

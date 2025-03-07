@@ -6,19 +6,47 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 const prisma = new PrismaClient();
 
 const createPlaylist = asyncHandler(async (req, res) => {
-  const { name, description } = req.body;
+  const { name, description, videoIds } = req.body;
   const userId = req.user.id;
 
   if (!name) {
     throw new ApiError(400, "Playlist name is required");
   }
 
+  if (!videoIds || !Array.isArray(videoIds) || videoIds.length === 0) {
+    throw new ApiError(400, "At least one video is required for a playlist");
+  }
+
   try {
+    // Verify that all videoIds exist in the database
+    const videoCount = await prisma.video.count({
+      where: {
+        id: {
+          in: videoIds
+        }
+      }
+    });
+
+    if (videoCount !== videoIds.length) {
+      throw new ApiError(400, "One or more video IDs are invalid");
+    }
+
     const playlist = await prisma.playlist.create({
       data: {
         name,
         description: description || "",
-        userId
+        owner: userId,
+        videoIds: videoIds
+      },
+      include: {
+        videos: true,
+        user: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true
+          }
+        }
       }
     });
 
@@ -39,7 +67,7 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
 
   try {
     const playlists = await prisma.playlist.findMany({
-      where: { userId },
+      where: { owner: userId },
       include: {
         user: {
           select: {
@@ -48,7 +76,7 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
             avatar: true
           }
         },
-        videosList: {
+        videos: {
           select: {
             id: true,
             title: true,
@@ -90,7 +118,7 @@ const getPlaylistById = asyncHandler(async (req, res) => {
             avatar: true
           }
         },
-        videosList: {
+        videos: {
           select: {
             id: true,
             title: true,
@@ -135,7 +163,7 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Playlist not found");
     }
 
-    if (playlist.userId !== userId) {
+    if (playlist.owner !== userId) {
       throw new ApiError(403, "You don't have permission to modify this playlist");
     }
 
@@ -149,16 +177,7 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
     }
 
     // Check if video is already in playlist
-    const existingVideo = await prisma.playlist.findFirst({
-      where: {
-        id: playlistId,
-        videos: {
-          has: videoId
-        }
-      }
-    });
-
-    if (existingVideo) {
+    if (playlist.videoIds.includes(videoId)) {
       throw new ApiError(400, "Video already in playlist");
     }
 
@@ -166,12 +185,12 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
     const updatedPlaylist = await prisma.playlist.update({
       where: { id: playlistId },
       data: {
-        videos: {
+        videoIds: {
           push: videoId
         }
       },
       include: {
-        videosList: {
+        videos: {
           select: {
             id: true,
             title: true,
@@ -207,12 +226,12 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Playlist not found");
     }
 
-    if (playlist.userId !== userId) {
+    if (playlist.owner !== userId) {
       throw new ApiError(403, "You don't have permission to modify this playlist");
     }
 
     // Check if video is in playlist
-    if (!playlist.videos.includes(videoId)) {
+    if (!playlist.videoIds.includes(videoId)) {
       throw new ApiError(400, "Video not in playlist");
     }
 
@@ -220,12 +239,12 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
     const updatedPlaylist = await prisma.playlist.update({
       where: { id: playlistId },
       data: {
-        videos: {
-          set: playlist.videos.filter(id => id !== videoId)
+        videoIds: {
+          set: playlist.videoIds.filter(id => id !== videoId)
         }
       },
       include: {
-        videosList: {
+        videos: {
           select: {
             id: true,
             title: true,
@@ -261,7 +280,7 @@ const deletePlaylist = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Playlist not found");
     }
 
-    if (playlist.userId !== userId) {
+    if (playlist.owner !== userId) {
       throw new ApiError(403, "You don't have permission to delete this playlist");
     }
 
@@ -282,7 +301,7 @@ const updatePlaylist = asyncHandler(async (req, res) => {
   const { name, description } = req.body;
   const userId = req.user.id;
   
-  if (!playlistId || (!name && !description)) {
+  if (!playlistId || (!name && description === undefined)) {
     throw new ApiError(400, "Playlist ID and at least one update field are required");
   }
 
@@ -296,7 +315,7 @@ const updatePlaylist = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Playlist not found");
     }
 
-    if (playlist.userId !== userId) {
+    if (playlist.owner !== userId) {
       throw new ApiError(403, "You don't have permission to update this playlist");
     }
 
@@ -316,6 +335,7 @@ const updatePlaylist = asyncHandler(async (req, res) => {
     throw new ApiError(500, `Failed to update playlist: ${error.message}`);
   }
 });
+
 
 export {
   createPlaylist,
