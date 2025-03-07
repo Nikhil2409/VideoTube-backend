@@ -71,6 +71,8 @@ model Comment {
   content   String
   videoId   String?  @db.ObjectId
   video     Video?   @relation("VideoComments", fields: [videoId], references: [id])
+  tweetId   String?  @db.ObjectId
+  tweet     Tweet?   @relation("TweetComments", fields: [tweetId], references: [id])
   userId    String   @db.ObjectId
   user      User     @relation("UserComments", fields: [userId], references: [id])
   createdAt DateTime @default(now())
@@ -97,16 +99,19 @@ model Like {
 }
 
 model Tweet {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
   content   String
-  owner     String   @db.ObjectId
-  user      User     @relation("UserTweets", fields: [owner], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  likes     Like[]   @relation("TweetLikes")
+  image     String?   // Optional image URL field
+  owner     String    @db.ObjectId
+  user      User      @relation("UserTweets", fields: [owner], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  likes     Like[]    @relation("TweetLikes")
+  comments  Comment[] @relation("TweetComments")
 
   @@map("tweets")
 }
+
 
 model Playlist {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
