@@ -209,4 +209,77 @@ const getLikedVideos = asyncHandler(async (req, res) => {
   }
 });
 
-export { toggleCommentLike, toggleTweetLike, toggleVideoLike, getLikedVideos };
+const getLikedTweets = asyncHandler(async (req, res) => {
+  try {
+    // Get all likes by the user that have a video reference
+    const likedTweets = await prisma.like.findMany({
+      where: { 
+        likedBy: req.user.id,
+        NOT: { tweetId: null }
+      },
+      include: {
+        tweet:{
+          select:{
+          id:true,
+          content:true,
+          image:true,
+          owner:true,
+          createdAt: true,
+          views:true,
+        }
+      }
+      }
+    });
+    
+    const formattedTweets = likedTweets
+      .map(like => like.tweet)
+      .filter(Boolean);
+    
+    return res.status(200).json(
+      new ApiResponse(200, formattedTweets, "Liked tweets fetched successfully")
+    );
+  } catch (error) {
+    console.error("Get liked videos error:", error);
+    return res.status(error.statusCode || 500).json(
+      new ApiResponse(error.statusCode || 500, null, error.message || "Something went wrong while fetching liked videos")
+    );
+  }
+});
+
+const getLikedComments = asyncHandler(async (req, res) => {
+  try {
+    // Get all likes by the user that have a video reference
+    const likedComments = await prisma.like.findMany({
+      where: { 
+        likedBy: req.user.id,
+        NOT: { commentId: null }
+      },
+      include: {
+        comment:{
+          select:{
+          id:true,
+          content:true,
+          owner:true,
+          createdAt: true,
+          videoId:true,
+        }
+      }
+      }
+    });
+    
+    const formattedComments = likedComments
+      .map(like => like.comment)
+      .filter(Boolean);
+    
+    return res.status(200).json(
+      new ApiResponse(200, formattedComments, "Liked comments fetched successfully")
+    );
+  } catch (error) {
+    console.error("Get liked comments error:", error);
+    return res.status(error.statusCode || 500).json(
+      new ApiResponse(error.statusCode || 500, null, error.message || "Something went wrong while fetching liked comments")
+    );
+  }
+});
+
+export { toggleCommentLike, toggleTweetLike, toggleVideoLike, getLikedVideos, getLikedTweets, getLikedComments };

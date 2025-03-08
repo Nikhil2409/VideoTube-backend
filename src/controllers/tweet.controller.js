@@ -6,6 +6,39 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 
 const prisma = new PrismaClient();
 
+const incrementViewCount = asyncHandler(async(req, res) => {
+  const { tweetId } = req.params;
+  
+  try {
+    const tweet = await prisma.tweet.update({
+      where: {
+        id: tweetId
+      },
+      data: {
+        views: {
+          increment: 1
+        }
+      }
+    });
+    
+    if (!tweet) {
+      throw new ApiError(404, "Video not found");
+    }
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, tweet, "View count incremented successfully"));  
+  } catch(err) {
+    if (err.code === 'P2023') {
+      throw new ApiError(400, "Invalid video ID format");
+    }
+    if (err.code === 'P2025') {
+      throw new ApiError(404, "Video not found");
+    }
+    throw new ApiError(500, err?.message || "Error incrementing view count");
+  }
+});
+
 const createTweet = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { content } = req.body;
@@ -160,20 +193,11 @@ const getUserTweets = asyncHandler(async (req, res) => {
           avatar: true
         }
       },
-      likes: true,
-      comments: true
     },
     orderBy: {
       createdAt: 'desc'
     }
   });
-  
-  // Add counts to each tweet
-  const tweetsWithCounts = tweets.map(tweet => ({
-    ...tweet,
-    likesCount: tweet.likes.length,
-    commentsCount: tweet.comments.length
-  }));
   
   if (tweets.length === 0) {
     return res.status(200).json({
@@ -185,7 +209,7 @@ const getUserTweets = asyncHandler(async (req, res) => {
   
   return res.status(200).json({
     success: true,
-    tweets: tweetsWithCounts
+    tweets: tweets
   });
 });
 
@@ -311,4 +335,16 @@ const deleteTweet = asyncHandler(async (req, res) => {
   }
 });
 
-export { createTweet, getTweetById, getUserTweets, updateTweet, deleteTweet };
+const getAllTweets = asyncHandler(async (req, res) => {
+  const tweets = await prisma.tweet.findMany({
+    orderBy: {
+      createdAt: 'desc'
+    }
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
+});
+
+export { incrementViewCount, createTweet, getTweetById, getUserTweets, updateTweet, deleteTweet, getAllTweets };

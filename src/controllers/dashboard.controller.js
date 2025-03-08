@@ -40,7 +40,13 @@ const getChannelStats = asyncHandler(async (req, res) => {
       where: { owner: userId },
       _sum: { views: true },
     });
-
+    
+    // Count total tweets
+    const totalTweets = await prisma.tweet.count({
+      where: { owner: userId
+      }
+    });
+    
     res.status(200).json(
       new ApiResponse(
         200,
@@ -49,6 +55,7 @@ const getChannelStats = asyncHandler(async (req, res) => {
           totalSubscribers,
           totalLikes,
           totalViews: videosWithViews._sum.views || 0,
+          totalTweets,
         },
         "Channel stats fetched successfully"
       )

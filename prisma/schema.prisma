@@ -101,6 +101,8 @@ model Like {
 model Tweet {
   id        String    @id @default(auto()) @map("_id") @db.ObjectId
   content   String
+  views     Int       @default(0)
+  isPublished Boolean @default(true)
   image     String?   // Optional image URL field
   owner     String    @db.ObjectId
   user      User      @relation("UserTweets", fields: [owner], references: [id])

@@ -157,13 +157,13 @@ const getVideoById = asyncHandler(async (req, res) => {
         id: videoId
       },
       include: {
-        user: {  // Changed from "owner" to "user" to match your schema
+        user: { 
           select: {
             id: true,
             username: true,
             fullName: true,
             avatar: true,
-            subscribers: { // We'll count these later
+            subscribers: { 
               select: {
                 id: true
               }
@@ -172,7 +172,7 @@ const getVideoById = asyncHandler(async (req, res) => {
         },
         comments: {
           include: {
-            user: {  // Changed from "owner" to "user"
+            user: { 
               select: {
                 id: true,
                 username: true,
@@ -184,7 +184,7 @@ const getVideoById = asyncHandler(async (req, res) => {
         },
         likes: {
           include: {
-            user: {  // Changed from "likedBy" to "user"
+            user: {  
               select: {
                 id: true,
                 username: true,
