@@ -134,8 +134,9 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
 });
 
 const getSubscribedChannels = asyncHandler(async (req, res) => {
-  const { userId } = req.params;
   const { page = 1, limit = 10 } = req.query;
+
+  const userId = req.user.id;
 
   if (!userId) {
     throw new ApiError(400, "User ID is required");

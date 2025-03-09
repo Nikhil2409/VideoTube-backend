@@ -16,6 +16,7 @@ class UserTokenService {
         email: user.email,
         username: user.username,
         fullName: user.fullName,
+        avatar: user.avatar,
         role: 'user', // Default role
         profileVerified: false, // Default verification status,
         likes: user.likes || [],
