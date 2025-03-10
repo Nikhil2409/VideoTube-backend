@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import { deleteFromCloudinary, uploadOnCloudinary } from "../utils/cloudinary.js";
 import fs from "fs";
 import path from "path";
 import { cloudinary } from "../utils/cloudinary.js";
@@ -375,6 +375,8 @@ const deleteVideo = asyncHandler(async (req, res) => {
       }
     });
     
+    deleteFromCloudinary(existingVideo.videoFile);
+    deleteFromCloudinary(existingVideo.thumbnail);
     return res
       .status(200)
       .json(new ApiResponse(200, {}, "Video deleted successfully"));

@@ -77,12 +77,15 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
           }
         },
         videos: {
+          where:{
+            isPublished: true
+          },
           select: {
             id: true,
             title: true,
             thumbnail: true,
             duration: true,
-            views: true
+            views: true,
           }
         }
       },
@@ -119,6 +122,9 @@ const getPlaylistById = asyncHandler(async (req, res) => {
           }
         },
         videos: {
+          where:{
+            isPublished: true
+          },
           select: {
             id: true,
             title: true,

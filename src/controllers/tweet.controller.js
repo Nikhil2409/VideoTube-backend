@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import { deleteFromCloudinary, uploadOnCloudinary } from "../utils/cloudinary.js";
 
 const prisma = new PrismaClient();
 
@@ -324,6 +324,7 @@ const deleteTweet = asyncHandler(async (req, res) => {
       }
     });
     
+    deleteFromCloudinary(tweet.image);
     return res.status(200).json(
       new ApiResponse(200, {}, "Tweet deleted successfully")
     );
