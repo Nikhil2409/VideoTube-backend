@@ -1,31 +1,52 @@
-import mongoose from "mongoose";
-import { Video } from "../models/video.model.js";
-import { Subscription } from "../models/subscription.model.js";
-import { Like } from "../models/like.model.js";
+import { PrismaClient } from "@prisma/client";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
+const prisma = new PrismaClient();
+
 // Get channel statistics
 const getChannelStats = asyncHandler(async (req, res) => {
   const { userId } = req.params;
-
+  console.log(userId);
+ 
   try {
-    const totalVideos = await Video.countDocuments({ uploader: userId });
-
-    const totalSubscribers = await Subscription.countDocuments({
-      channel: userId,
+    // Count total videos
+    const totalVideos = await prisma.video.count({
+      where: { owner: userId },
     });
 
-    const totalLikes = await Like.countDocuments({
-      video: { $in: await Video.find({ uploader: userId }).distinct("_id") },
+    // Count total subscribers
+    const totalSubscribers = await prisma.subscription.count({
+      where: { channelId: userId },
     });
 
-    const totalViews = await Video.aggregate([
-      { $match: { uploader: new mongoose.Types.ObjectId(userId) } },
-      { $group: { _id: null, totalViews: { $sum: "$views" } } },
-    ]);
+    // Get all video IDs from this user
+    const userVideos = await prisma.video.findMany({
+      where: { owner: userId },
+      select: { id: true },
+    });
+    const videoIds = userVideos.map(video => video.id);
 
+    // Count total likes on these videos
+    const totalLikes = await prisma.like.count({
+      where: {
+        videoId: { in: videoIds },
+      },
+    });
+
+    // Sum total views
+    const videosWithViews = await prisma.video.aggregate({
+      where: { owner: userId },
+      _sum: { views: true },
+    });
+    
+    // Count total tweets
+    const totalTweets = await prisma.tweet.count({
+      where: { owner: userId
+      }
+    });
+    
     res.status(200).json(
       new ApiResponse(
         200,
@@ -33,13 +54,14 @@ const getChannelStats = asyncHandler(async (req, res) => {
           totalVideos,
           totalSubscribers,
           totalLikes,
-          totalViews: totalViews.length > 0 ? totalViews[0].totalViews : 0,
+          totalViews: videosWithViews._sum.views || 0,
+          totalTweets,
         },
         "Channel stats fetched successfully"
       )
     );
   } catch (error) {
-    res.status(500).json(new ApiError(500, "Error fetching channel stats"));
+    throw new ApiError(500, error?.message || "Error fetching channel stats");
   }
 });
 
@@ -47,12 +69,15 @@ const getChannelStats = asyncHandler(async (req, res) => {
 const getChannelVideos = asyncHandler(async (req, res) => {
   const { userId } = req.params;
   const { page = 1, limit = 10 } = req.query;
+  const skip = (parseInt(page) - 1) * parseInt(limit);
 
   try {
-    const videos = await Video.find({ uploader: userId })
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+    const videos = await prisma.videos.findMany({
+      where: { owner: userId },
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: parseInt(limit),
+    });
 
     res
       .status(200)
