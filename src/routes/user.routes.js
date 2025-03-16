@@ -15,7 +15,8 @@ import {
   deleteSpecificData,
   getUserWatchHistory,
   createWatchHistoryEntry,
-  clearUserWatchHistory
+  clearUserWatchHistory,
+  googleAuth,
 } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -37,9 +38,6 @@ router.route("/register").post(
 );
 
 router.route("/login").post(loginUser);
-
-//secured routes
-//router.post('/delete-all-data', verifyJWT, deleteAllData);]
 router.post('/inspect-data', verifyJWT, inspectData);
 router.post('/delete-specific-data', verifyJWT, deleteSpecificData)
 router.route("/logout").post(verifyJWT, logoutUser);
@@ -54,6 +52,7 @@ router.route("/update-account").patch(
   ]),
   updateAccountDetails
 );
+router.route("/google-auth").post(googleAuth);
 router.route("/getUser/:id").get(getUser);
 router
   .route("/avatar")

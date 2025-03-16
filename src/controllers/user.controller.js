@@ -7,7 +7,14 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt"; // You'll need this for password hashing
 import UserTokenService from "../utils/Auth.utils.js"
 import {inspectUserData, deleteSpecificUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
+import { OAuth2Client } from 'google-auth-library';
+import dotenv from "dotenv";
+import axios from 'axios';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
+dotenv.config({ path: "./src/.env" });
 
 const prisma = new PrismaClient();
 
@@ -147,6 +154,7 @@ const registerUser = asyncHandler(async (req, res) => {
   console.log("Cover Image URL:", coverImage);
 
   // Hash password before storing
+  console.log(password);
   const hashedPassword = await bcrypt.hash(password, 10);
   
   // Create user with Prisma
@@ -204,6 +212,7 @@ const loginUser = asyncHandler(async (req, res) => {
   }
 
   // Check password with bcrypt
+  console.log(user.password);
   const isPasswordValid = await bcrypt.compare(password, user.password);
 
   if (!isPasswordValid) {
@@ -343,7 +352,9 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
   });
   
   // Check password with bcrypt
-  const isPasswordCorrect = await bcrypt.compare(oldPassword, user.password);
+  console.log(user.password);
+  console.log(oldPassword);
+  const isPasswordCorrect = user.password === oldPassword;
 
   if (!isPasswordCorrect) {
     throw new ApiError(400, "Invalid current password");
@@ -501,7 +512,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
   // Find the user and get their channel profile information
   const user = await prisma.user.findUnique({
-    where: { username: username.toLowerCase() },
+    where: { username: username },
     select: {
       id: true,
       fullName: true,
@@ -513,7 +524,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
       subscribedTo: true,
     }
   });
-
+  
   if (!user) {
     throw new ApiError(404, "Channel does not exist");
   }
@@ -565,28 +576,83 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 const getUser = asyncHandler(async (req, res) => {
   const { id } = req.params;
   
-  // Check if ID is valid
+  // Check if ID is provided
   if (!id) {
-    throw new ApiError(400, 'Invalid user ID format');
+    throw new ApiError(400, 'User ID is required');
   }
   
-  const user = await prisma.user.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      username: true,
-      fullName: true,
-      avatar: true
+  try {
+    // First try with the ID as is
+    let user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        coverImage: true // Added this since it might be useful
+      }
+    });
+    
+    // If user not found, try additional strategies for Google Auth IDs
+    if (!user) {
+      // If the ID might be in a different format (e.g., not ObjectId for Google Auth users)
+      // Log for debugging
+      console.log(`User not found with ID: ${id}. Checking alternate formats.`);
+      
+      // Option 1: Search by username if the ID might be a username
+      user = await prisma.user.findUnique({
+        where: { username: id },
+        select: {
+          id: true,
+          username: true,
+          fullName: true,
+          avatar: true,
+          coverImage: true
+        }
+      });
+      
+      // Option 2: If Option 1 fails, try searching by email if the ID might be an email
+      if (!user) {
+        user = await prisma.user.findUnique({
+          where: { email: id },
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true,
+            coverImage: true
+          }
+        });
+      }
+      
+      // If still no user found
+      if (!user) {
+        // Log all users to check if there's any pattern in IDs
+        const allUsers = await prisma.user.findMany({
+          select: { id: true, username: true, email: true },
+          take: 5 // Limit to avoid huge logs
+        });
+        console.log("Sample users in database:", allUsers);
+        
+        throw new ApiError(404, 'User not found');
+      }
     }
-  });
-  
-  if (!user) {
-    throw new ApiError(404, 'User not found');
+    
+    return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
+  } catch (error) {
+    // Check if it's a Prisma error related to ID format
+    if (error.code === 'P2023') {
+      throw new ApiError(400, 'Invalid ID format');
+    }
+    // Re-throw ApiErrors as is
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    // Generic error
+    throw new ApiError(500, `Failed to fetch user: ${error.message}`);
   }
-  
-  return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
 });
-
 const clearUserWatchHistory = asyncHandler(async (req, res) => {
   try {
     const userId = req.user.id;
@@ -720,6 +786,85 @@ const createWatchHistoryEntry = asyncHandler(async (req, res) => {
   );
 });
 
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+const googleAuth = asyncHandler(async (req, res) => {
+  const { token } = req.body;
+
+  const ticket = await client.verifyIdToken({
+    idToken: token,
+    audience: process.env.GOOGLE_CLIENT_ID
+  });
+
+  const { name, email, picture } = ticket.getPayload();
+  const prisma = new PrismaClient();
+
+  let user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user) {
+    // Download Google profile picture
+    const response = await axios.get(picture, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+    
+    // Save to temp file
+    const tempFilePath = path.join(os.tmpdir(), `${Date.now()}-google-avatar.jpg`);
+    fs.writeFileSync(tempFilePath, buffer);
+    
+    // Upload to Cloudinary - this already handles the file deletion internally
+    const cloudinaryAvatar = await uploadOnCloudinary(tempFilePath);
+    
+    // REMOVE THIS LINE - Don't delete the file again
+    // fs.unlinkSync(tempFilePath);
+    
+    // Create a new user with Cloudinary avatar
+    user = await prisma.user.create({
+      data: {
+        fullName: name,
+        email,
+        avatar: cloudinaryAvatar || picture, // Fallback to Google URL if upload fails
+        username: email.split('@')[0].toLowerCase(),
+        password: email.split('@')[0].toLowerCase(), // Dummy password to be changed later
+      }
+    });
+  }
+
+  const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user.id);
+
+  const loggedInUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: {
+      id: true,
+      fullName: true,
+      avatar: true,
+      email: true,
+      username: true,
+      createdAt: true,
+      updatedAt: true
+    }
+  });
+
+  const options = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production"
+  };
+
+  return res
+    .status(200)
+    .cookie("accessToken", accessToken, options)
+    .cookie("refreshToken", refreshToken, options)
+    .json(
+      new ApiResponse(
+        200,
+        {
+          user: loggedInUser,
+          accessToken,
+          refreshToken,
+        },
+        "User logged in successfully with Google"
+      )
+    );
+});
+
 
 export {
   registerUser,
@@ -737,5 +882,6 @@ export {
   deleteSpecificData,
   getUserWatchHistory,
   createWatchHistoryEntry,
-  clearUserWatchHistory
+  clearUserWatchHistory,
+  googleAuth,
 };
