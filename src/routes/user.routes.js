@@ -20,6 +20,15 @@ import {
 } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
+import rateLimit from "express-rate-limit";
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Increased limit per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Too many authentication attempts, please try again later"
+});
 
 const router = Router();
 
@@ -37,11 +46,11 @@ router.route("/register").post(
   registerUser
 );
 
-router.route("/login").post(loginUser);
+router.route("/login").post(authLimiter,loginUser);
 router.post('/inspect-data', verifyJWT, inspectData);
 router.post('/delete-specific-data', verifyJWT, deleteSpecificData)
 router.route("/logout").post(verifyJWT, logoutUser);
-router.route("/refresh-token").post(refreshAccessToken);
+router.route("/refresh-token").post(authLimiter,refreshAccessToken);
 router.route("/change-password").patch(verifyJWT, changeCurrentPassword);
 router.route("/current-user").get(verifyJWT, getCurrentUser);
 router.route("/update-account").patch(

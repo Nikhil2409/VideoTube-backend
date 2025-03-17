@@ -2,91 +2,38 @@ import { PrismaClient } from "@prisma/client";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import redisClient from "../config/redis.js";
+import { REDIS_KEYS } from "../constants/redisKeys.js";
 
 const prisma = new PrismaClient();
 
-// Get channel statistics
 const getChannelStats = asyncHandler(async (req, res) => {
   const { userId } = req.params;
-  console.log(userId);
- 
+  const cacheKey = `${REDIS_KEYS.CHANNEL}${userId}:stats`;
+
+  // Check Redis cache first
+  const cachedStats = await redisClient.get(cacheKey);
+  if (cachedStats) {
+    return res.status(200).json(new ApiResponse(200, JSON.parse(cachedStats), "Channel stats fetched from cache"));
+  }
+
   try {
-    // Count total videos
-    const totalVideos = await prisma.video.count({
-      where: { owner: userId },
-    });
+    const totalVideos = await prisma.video.count({ where: { owner: userId } });
+    const totalSubscribers = await prisma.subscription.count({ where: { channelId: userId } });
+    const videoIds = (await prisma.video.findMany({ where: { owner: userId }, select: { id: true } })).map(v => v.id);
+    const totalLikes = await prisma.like.count({ where: { videoId: { in: videoIds } } });
+    const totalViews = (await prisma.video.aggregate({ where: { owner: userId }, _sum: { views: true } }))._sum.views || 0;
+    const totalTweets = await prisma.tweet.count({ where: { owner: userId } });
 
-    // Count total subscribers
-    const totalSubscribers = await prisma.subscription.count({
-      where: { channelId: userId },
-    });
+    const stats = { totalVideos, totalSubscribers, totalLikes, totalViews, totalTweets };
 
-    // Get all video IDs from this user
-    const userVideos = await prisma.video.findMany({
-      where: { owner: userId },
-      select: { id: true },
-    });
-    const videoIds = userVideos.map(video => video.id);
-
-    // Count total likes on these videos
-    const totalLikes = await prisma.like.count({
-      where: {
-        videoId: { in: videoIds },
-      },
-    });
-
-    // Sum total views
-    const videosWithViews = await prisma.video.aggregate({
-      where: { owner: userId },
-      _sum: { views: true },
-    });
+    // Cache result
+    await redisClient.set(cacheKey, JSON.stringify(stats), { EX: 3600 });
     
-    // Count total tweets
-    const totalTweets = await prisma.tweet.count({
-      where: { owner: userId
-      }
-    });
-    
-    res.status(200).json(
-      new ApiResponse(
-        200,
-        {
-          totalVideos,
-          totalSubscribers,
-          totalLikes,
-          totalViews: videosWithViews._sum.views || 0,
-          totalTweets,
-        },
-        "Channel stats fetched successfully"
-      )
-    );
+    res.status(200).json(new ApiResponse(200, stats, "Channel stats fetched successfully"));
   } catch (error) {
-    throw new ApiError(500, error?.message || "Error fetching channel stats");
+    throw new ApiError(500, error.message || "Error fetching channel stats");
   }
 });
 
-// Get all videos of a user (with pagination)
-const getChannelVideos = asyncHandler(async (req, res) => {
-  const { userId } = req.params;
-  const { page = 1, limit = 10 } = req.query;
-  const skip = (parseInt(page) - 1) * parseInt(limit);
-
-  try {
-    const videos = await prisma.videos.findMany({
-      where: { owner: userId },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: parseInt(limit),
-    });
-
-    res
-      .status(200)
-      .json(
-        new ApiResponse(200, videos, "Channel videos fetched successfully")
-      );
-  } catch (error) {
-    res.status(500).json(new ApiError(500, "Error fetching channel videos"));
-  }
-});
-
-export { getChannelStats, getChannelVideos };
+export { getChannelStats };

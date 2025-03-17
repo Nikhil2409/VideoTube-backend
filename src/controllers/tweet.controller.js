@@ -2,7 +2,9 @@ import { PrismaClient } from '@prisma/client';
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { deleteFromCloudinary, uploadOnCloudinary } from "../utils/cloudinary.js";
+import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import  redisClient  from "../config/redis.js";
+import { REDIS_KEYS } from "../constants/redisKeys.js";
 
 const prisma = new PrismaClient();
 
@@ -24,6 +26,11 @@ const incrementViewCount = asyncHandler(async(req, res) => {
     if (!tweet) {
       throw new ApiError(404, "Video not found");
     }
+    
+    await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
+    await redisClient.del(`${REDIS_KEYS.ALL_TWEETS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${req.user.id}`);
+    await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${req.user.id}`);
 
     return res
       .status(200)
@@ -43,44 +50,32 @@ const createTweet = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { content } = req.body;
   
-  console.log("Request body:", req.body);
-  console.log("Request file:", req.file);
-  
   if (!content?.trim()) {
     throw new ApiError(400, "Content is required");
   }
   
-  // Initialize tweet data
   const tweetData = {
     content,
     owner: userId 
   };
   
-  // Handle image upload if present
   if (req.file) {
     const imageLocalPath = req.file.path;
     
-    // Upload image using your existing cloudinary utility
     try {
       const imageUrl = await uploadOnCloudinary(imageLocalPath);
-      
-      if (!imageUrl) {
-        throw new ApiError(500, "Error uploading image");
-      }
-      
-      // Add image URL to tweet data
       tweetData.image = imageUrl;
     } catch (error) {
-      console.error("Image upload error:", error);
       throw new ApiError(500, `Error uploading image: ${error.message}`);
     }
   }
   
-  // Create tweet with image if uploaded
   const tweet = await prisma.tweet.create({
     data: tweetData
   });
   
+  await redisClient.del(REDIS_KEYS.ALL_TWEETS);
+  await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
   return res.status(201).json(
     new ApiResponse(201, tweet, "Tweet created successfully")
   );
@@ -91,6 +86,11 @@ const getTweetById = asyncHandler(async (req, res) => {
   
   if (!tweetId) {
     throw new ApiError(400, "Tweet ID is required");
+  }
+
+  const cachedTweet = await redisClient.get(`${REDIS_KEYS.TWEET}${tweetId}`);
+  if (cachedTweet) {
+    return res.status(200).json(new ApiResponse(200, JSON.parse(cachedTweet), "Tweet fetched from cache"));
   }
 
   try {
@@ -142,30 +142,17 @@ const getTweetById = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Tweet not found");
     }
 
-    // Process the data to match expected format
     const tweetResponse = {
       ...tweet,
       likesCount: tweet.likes.length,
       commentsCount: tweet.comments.length,
-      isLiked: false
+      isLiked: req.user ? tweet.likes.some(like => like.user.id === req.user.id) : false
     };
 
-    // Check if user is authenticated and update like status
-    if (req.user) {
-      // Check if the current user has liked this tweet
-      const likeExists = tweet.likes.some(like => like.user.id === req.user.id);
-      tweetResponse.isLiked = likeExists;
-    }
+    await redisClient.set(`${REDIS_KEYS.TWEET}${tweetId}`, JSON.stringify(tweetResponse));
 
-    // Return the tweet with all necessary information
-    return res
-      .status(200)
-      .json(new ApiResponse(200, tweetResponse, "Tweet fetched successfully"));
-      
+    return res.status(200).json(new ApiResponse(200, tweetResponse, "Tweet fetched successfully"));
   } catch (error) {
-    if (error.code === 'P2023') {
-      throw new ApiError(400, "Invalid tweet ID format");
-    }
     throw new ApiError(500, error?.message || "Failed to fetch tweet");
   }
 });
@@ -174,10 +161,13 @@ const getUserTweets = asyncHandler(async (req, res) => {
   const { userId } = req.params;
   
   if (!userId?.trim()) {
-    return res.status(400).json({
-      success: false,
-      message: "User ID is required"
-    });
+    return res.status(400).json({ success: false, message: "User ID is required" });
+  }
+  console.log(userId);
+  const cachedTweets = await redisClient.get(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+  console.log(cachedTweets);
+  if (cachedTweets) {
+    return res.status(200).json(new ApiResponse(200, JSON.parse(cachedTweets), "Tweets fetched from cache"));
   }
   
   const tweets = await prisma.tweet.findMany({
@@ -207,10 +197,10 @@ const getUserTweets = asyncHandler(async (req, res) => {
     });
   }
   
-  return res.status(200).json({
-    success: true,
-    tweets: tweets
-  });
+  
+  await redisClient.set(`${REDIS_KEYS.USER_TWEETS}${userId}`, JSON.stringify(tweets));
+  
+  return res.status(200).json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
 });
 
 const updateTweet = asyncHandler(async (req, res) => {
@@ -272,6 +262,9 @@ const updateTweet = asyncHandler(async (req, res) => {
     data: updateData
   });
   
+  await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
+  await redisClient.set(`${REDIS_KEYS.TWEET}${tweetId}`, JSON.stringify(tweet));
+  
   return res.status(200).json(
     new ApiResponse(200, updatedTweet, "Tweet updated successfully")
   );
@@ -300,6 +293,12 @@ const deleteTweet = asyncHandler(async (req, res) => {
     throw new ApiError(403, "You don't have permission to delete this tweet");
   }
   
+  await prisma.tweet.delete({ where: { id: tweetId } });
+  await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
+  await redisClient.del(REDIS_KEYS.ALL_TWEETS);
+  await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+  await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${tweetId}`);
+
   try {
     // Delete associated records first to maintain referential integrity
     
@@ -324,7 +323,6 @@ const deleteTweet = asyncHandler(async (req, res) => {
       }
     });
     
-    deleteFromCloudinary(tweet.image);
     return res.status(200).json(
       new ApiResponse(200, {}, "Tweet deleted successfully")
     );
@@ -337,11 +335,18 @@ const deleteTweet = asyncHandler(async (req, res) => {
 });
 
 const getAllTweets = asyncHandler(async (req, res) => {
+  const cachedTweets = await redisClient.get(REDIS_KEYS.ALL_TWEETS);
+  if (cachedTweets) {
+    return res.status(200).json(new ApiResponse(200, JSON.parse(cachedTweets), "Tweets fetched from cache"));
+  }
+
   const tweets = await prisma.tweet.findMany({
     orderBy: {
       createdAt: 'desc'
     }
   });
+
+  await redisClient.set(REDIS_KEYS.ALL_TWEETS, JSON.stringify(tweets));
 
   return res
     .status(200)

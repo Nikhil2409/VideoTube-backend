@@ -173,48 +173,6 @@ export const uploadOnCloudinary = async (filePath, resourceType = "image") => {
  * @param {string} fileUrl - Cloudinary URL of the file to delete
  * @returns {Promise<Object>} - Result of the deletion operation
  */
-export const deleteFromCloudinary = async (fileUrl) => {
-  try {
-    if (!fileUrl) {
-      throw new Error("File URL is required");
-    }
-    
-    // Determine the resource type from the URL
-    let resourceType = "image"; // Default
-    if (fileUrl.includes("/video/")) {
-      resourceType = "video";
-    } else if (fileUrl.includes("/raw/")) {
-      resourceType = "raw";
-    }
-    
-    // Extract the public_id from the URL
-    const publicId = getPublicIdFromUrl(fileUrl);
-    
-    if (!publicId) {
-      throw new Error("Could not extract public_id from URL");
-    }
-    
-    console.log(`Deleting ${resourceType} from Cloudinary, public_id: ${publicId}`);
-    
-    // Delete the resource
-    const result = await cloudinary.uploader.destroy(publicId, {
-      resource_type: resourceType
-    });
-    
-    if (result.result === "ok") {
-      console.log(`Successfully deleted ${resourceType} from Cloudinary`);
-    } else if (result.result === "not found") {
-      console.log(`File not found on Cloudinary: ${publicId}`);
-    } else {
-      console.log(`Deletion status: ${result.result}`);
-    }
-    
-    return result;
-  } catch (error) {
-    console.error("Cloudinary Deletion Error:", error);
-    throw new Error(`Deletion failed: ${error.message}`);
-  }
-};
 
 // Export the list resources function for checking what's in your Cloudinary account
 export const listCloudinaryResources = async (folder = "videoTube", maxResults = 100) => {

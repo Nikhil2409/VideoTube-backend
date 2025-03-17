@@ -3,6 +3,7 @@ import cors from "cors"
 import cookieParser from "cookie-parser"
 import { createServer } from "http"
 import { Server } from "socket.io"
+import redisClient from "./config/redis.js"
 
 // Initialize Express app
 const app = express()

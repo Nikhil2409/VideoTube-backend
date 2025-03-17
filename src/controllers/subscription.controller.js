@@ -2,13 +2,14 @@ import { PrismaClient } from "@prisma/client";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import redisClient from "../config/redis.js";
+import { REDIS_KEYS } from "../constants/redisKeys.js";
 
 const prisma = new PrismaClient();
 
 const toggleSubscription = asyncHandler(async (req, res) => {
   const { channelId } = req.params;
   const subscriberId = req.user.id;
-  
   if (!channelId) {
     throw new ApiError(400, "Channel ID is required");
   }
@@ -37,6 +38,8 @@ const toggleSubscription = asyncHandler(async (req, res) => {
       }
     });
     
+    let result;
+    
     if (existingSubscription) {
       // Unsubscribe
       await prisma.subscription.delete({
@@ -45,8 +48,26 @@ const toggleSubscription = asyncHandler(async (req, res) => {
         }
       });
       
+      result = { subscribed: false, success: true };
+      
+      // Clear ALL related caches
+      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}`);
+      await redisClient.del(`${REDIS_KEYS.USER}${channel.username}`);
+      
+      // Clear paginated caches too (pattern deletion)
+      const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
+      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}_p*`);
+      
+      if (subscriptionKeys.length > 0) {
+        await redisClient.del(subscriptionKeys);
+      }
+      if (subscriberKeys.length > 0) {
+        await redisClient.del(subscriberKeys);
+      }
+      
       return res.status(200).json(
-        new ApiResponse(200, { subscribed: false }, "Unsubscribed successfully")
+        new ApiResponse(200, result, "Unsubscribed successfully")
       );
     } else {
       // Subscribe
@@ -57,8 +78,26 @@ const toggleSubscription = asyncHandler(async (req, res) => {
         }
       });
       
+      result = { subscribed: true, success: true };
+      
+      // Clear ALL related caches
+      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}`);
+      await redisClient.del(`${REDIS_KEYS.USER}${channel.username}`);
+      
+      // Clear paginated caches too (pattern deletion)
+      const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
+      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}_p*`);
+      
+      if (subscriptionKeys.length > 0) {
+        await redisClient.del(subscriptionKeys);
+      }
+      if (subscriberKeys.length > 0) {
+        await redisClient.del(subscriberKeys);
+      }
+      
       return res.status(200).json(
-        new ApiResponse(200, { subscribed: true }, "Subscribed successfully")
+        new ApiResponse(200, result, "Subscribed successfully")
       );
     }
   } catch (error) {
@@ -66,6 +105,8 @@ const toggleSubscription = asyncHandler(async (req, res) => {
     throw new ApiError(500, `Subscription operation failed: ${error.message}`);
   }
 });
+
+
 const getUserChannelSubscribers = asyncHandler(async (req, res) => {
   const { userId } = req.params;
   const { page = 1, limit = 10 } = req.query;
@@ -84,6 +125,19 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const cacheKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_p${page}_l${limit}`;
+
+    // Try to get data from cache
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(
+        new ApiResponse(
+          200,
+          JSON.parse(cachedData),
+          "Subscribers fetched from cache successfully"
+        )
+      );
+    }
 
     const subscriptions = await prisma.subscription.findMany({
       where: { channelId: userId },
@@ -116,15 +170,29 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
       subscribedAt: sub.createdAt
     }));
 
+    const responseData = { 
+      subscribers,
+      totalSubscribers,
+      page: parseInt(page),
+      totalPages: Math.ceil(totalSubscribers / parseInt(limit))
+    };
+
+    // Cache the result
+    await redisClient.set(
+      cacheKey,
+      JSON.stringify(responseData)
+    );
+
+    // Also cache the total subscribers count separately for quick access
+    await redisClient.set(
+      `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_count`,
+      totalSubscribers.toString()
+    );
+
     return res.status(200).json(
       new ApiResponse(
         200, 
-        { 
-          subscribers,
-          totalSubscribers,
-          page: parseInt(page),
-          totalPages: Math.ceil(totalSubscribers / parseInt(limit))
-        }, 
+        responseData, 
         "Subscribers fetched successfully"
       )
     );
@@ -135,7 +203,6 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
 
 const getSubscribedChannels = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
-
   const userId = req.user.id;
 
   if (!userId) {
@@ -152,6 +219,19 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
     }
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const cacheKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}_p${page}_l${limit}`;
+    
+    // Try to get data from cache
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(
+        new ApiResponse(
+          200,
+          JSON.parse(cachedData),
+          "Subscribed channels fetched from cache successfully"
+        )
+      );
+    }
     
     const subscriptions = await prisma.subscription.findMany({
       where: { subscriberId: userId },
@@ -186,16 +266,30 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
       subscribedAt: sub.createdAt
     }));
     
+    const responseData = { 
+      channels,
+      totalSubscriptions,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(totalSubscriptions / parseInt(limit))
+    };
+    
+    // Cache the result
+    await redisClient.set(
+      cacheKey,
+      JSON.stringify(responseData)
+    );
+    
+    // Also cache the total subscriptions count separately
+    await redisClient.set(
+      `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}_count`,
+      totalSubscriptions.toString()
+    );
+    
     return res.status(200).json(
       new ApiResponse(
         200, 
-        { 
-          channels,
-          totalSubscriptions,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages: Math.ceil(totalSubscriptions / parseInt(limit))
-        }, 
+        responseData, 
         "Subscribed channels fetched successfully"
       )
     );

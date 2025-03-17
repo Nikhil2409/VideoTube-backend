@@ -1,12 +1,15 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
-import { deleteFromCloudinary, uploadOnCloudinary } from "../utils/cloudinary.js";
+import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import fs from "fs";
 import path from "path";
 import { cloudinary } from "../utils/cloudinary.js";
 import { PrismaClient } from '@prisma/client';
 import ffmpeg from 'fluent-ffmpeg';
+import redisClient from "../config/redis.js";
+import { REDIS_KEYS } from "../constants/redisKeys.js";
+
 const prisma = new PrismaClient();
 
 const getVideoDuration = (videoPath) => {
@@ -25,6 +28,17 @@ const getVideoDuration = (videoPath) => {
 };
 
 const getAllVideos = asyncHandler(async (req, res) => {
+  // Check if data exists in Redis cache
+  const cachedVideos = await redisClient.get(`${REDIS_KEYS.ALL_VIDEOS}`);
+  
+  if (cachedVideos) {
+    const videos = JSON.parse(cachedVideos);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, videos, "Videos fetched from cache"));
+  }
+  
+  // If not in cache, fetch from database
   const videos = await prisma.video.findMany({
     where: {
       isPublished: true
@@ -34,6 +48,12 @@ const getAllVideos = asyncHandler(async (req, res) => {
     }
   });
 
+  // Store in Redis cache
+  await redisClient.set(
+    `${REDIS_KEYS.ALL_VIDEOS}`, 
+    JSON.stringify(videos)
+  );
+  
   return res
     .status(200)
     .json(new ApiResponse(200, videos, "Videos fetched successfully"));
@@ -41,6 +61,7 @@ const getAllVideos = asyncHandler(async (req, res) => {
 
 const incrementViewCount = asyncHandler(async(req, res) => {
   const { videoId } = req.params;
+  const userId = req.user.id;
   
   try {
     const video = await prisma.video.update({
@@ -51,6 +72,13 @@ const incrementViewCount = asyncHandler(async(req, res) => {
         views: {
           increment: 1
         }
+      },
+      include: {
+        user: {
+          select: {
+            username:true,
+          }
+        }
       }
     });
     
@@ -58,6 +86,13 @@ const incrementViewCount = asyncHandler(async(req, res) => {
       throw new ApiError(404, "Video not found");
     }
 
+    // Invalidate video cache since view count changed
+    await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEO_LIKES}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS_BY_USERNAME}${video.user.username}`);
+    
     return res
       .status(200)
       .json(new ApiResponse(200, video, "View count incremented successfully"));  
@@ -126,6 +161,10 @@ const publishAVideo = asyncHandler(async (req, res) => {
       throw new ApiError(500, "Failed to publish video");
     }
 
+    // Invalidate cache for all videos and user videos
+    await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${req.user.id}`);
+    
     return res
       .status(201)
       .json(new ApiResponse(201, video, "Video published successfully"));
@@ -151,6 +190,18 @@ const getVideoById = asyncHandler(async (req, res) => {
   }
 
   try {
+    // Check if video exists in Redis cache
+    const cachedVideo = await redisClient.get(`${REDIS_KEYS.VIDEO}${videoId}`);
+    
+    // If found in cache and user is not authenticated (since we store different versions for auth/unauth)
+    if (cachedVideo && !req.user) {
+      const videoData = JSON.parse(cachedVideo);
+      return res
+        .status(200)
+        .json(new ApiResponse(200, videoData, "Video fetched from cache"));
+    }
+    
+    // Cache miss or user is authenticated (need personalized data)
     // Find the video by ID using Prisma - change "owner" to "user"
     const video = await prisma.video.findUnique({
       where: {
@@ -241,6 +292,12 @@ const getVideoById = asyncHandler(async (req, res) => {
       
       // Update isSubscribed property
       videoResponse.owner.isSubscribed = !!subscription;
+    } else {
+      // If no authenticated user, cache the response
+      await redisClient.set(
+        `${REDIS_KEYS.VIDEO}${videoId}`,
+        JSON.stringify(videoResponse)
+      );
     }
 
     // Get the actual video URL if it's a Cloudinary ID rather than a full URL
@@ -250,6 +307,10 @@ const getVideoById = asyncHandler(async (req, res) => {
         secure: true
       });
     }
+
+    await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${req.user.id}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEO_LIKES}${req.user.id}`);
 
     // Return the video with all necessary information
     return res
@@ -263,6 +324,7 @@ const getVideoById = asyncHandler(async (req, res) => {
     throw new ApiError(500, error?.message || "Failed to fetch video");
   }
 });
+
 const updateVideo = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
   const { title, description } = req.body;
@@ -310,6 +372,11 @@ const updateVideo = asyncHandler(async (req, res) => {
         thumbnail: thumbnailUrl
       }
     });
+    
+    // Invalidate caches after update
+    await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
+    await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${req.user.id}`);
     
     return res
       .status(200)
@@ -375,8 +442,11 @@ const deleteVideo = asyncHandler(async (req, res) => {
       }
     });
     
-    deleteFromCloudinary(existingVideo.videoFile);
-    deleteFromCloudinary(existingVideo.thumbnail);
+    // Invalidate caches after deletion
+    await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
+    await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${req.user.id}`);
+    
     return res
       .status(200)
       .json(new ApiResponse(200, {}, "Video deleted successfully"));
@@ -407,7 +477,7 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Video not found");
     }
     
-    if (existingVideo.owner!== req.user.id) {
+    if (existingVideo.owner !== req.user.id) {
       throw new ApiError(403, "You are not authorized to modify this video");
     }
     
@@ -420,6 +490,11 @@ const togglePublishStatus = asyncHandler(async (req, res) => {
         isPublished: !existingVideo.isPublished
       }
     });
+    
+    // Invalidate caches after status change
+    await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
+    await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
+    await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${req.user.id}`);
     
     return res
       .status(200)
@@ -447,6 +522,19 @@ const ownedById = asyncHandler(async (req, res) => {
   }
   
   try {
+    // Check if data exists in Redis cache
+    const cachedVideos = await redisClient.get(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
+    
+    if (cachedVideos) {
+      const videos = JSON.parse(cachedVideos);
+      return res.status(200).json({
+        success: true,
+        videos: videos.length ? videos : [],
+        message: videos.length ? "Videos fetched from cache" : "No videos found for this user"
+      });
+    }
+    
+    // If not in cache, proceed with database query
     const user = await prisma.user.findUnique({
       where: {
         id: userId
@@ -479,6 +567,12 @@ const ownedById = asyncHandler(async (req, res) => {
       }
     });
     
+    // Store in Redis cache
+    await redisClient.set(
+      `${REDIS_KEYS.USER_VIDEOS}${userId}`,
+      JSON.stringify(videos)
+    );
+    
     return res.status(200).json({
       success: true,
       videos: videos.length ? videos : [],
@@ -500,6 +594,19 @@ const ownedByName = asyncHandler(async (req, res) => {
   }
   
   try {
+    // Check if data exists in Redis cache
+    const cachedVideos = await redisClient.get(`${REDIS_KEYS.USER_VIDEOS_BY_USERNAME}${username}`);
+    
+    if (cachedVideos) {
+      const videos = JSON.parse(cachedVideos);
+      return res.status(200).json({
+        success: true,
+        videos: videos.length ? videos : [],
+        message: videos.length ? "Videos fetched from cache" : "No videos found for this user"
+      });
+    }
+    
+    // If not in cache, proceed with database query
     const user = await prisma.user.findUnique({
       where: {
         username: username
@@ -532,6 +639,12 @@ const ownedByName = asyncHandler(async (req, res) => {
         createdAt: 'desc'
       }
     });
+    
+    // Store in Redis cache
+    await redisClient.set(
+      `${REDIS_KEYS.USER_VIDEOS_BY_USERNAME}${username}`,
+      JSON.stringify(videos)
+    );
     
     return res.status(200).json({
       success: true,

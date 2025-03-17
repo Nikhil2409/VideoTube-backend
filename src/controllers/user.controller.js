@@ -4,53 +4,108 @@ import { ApiResponse } from "../utils/apiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcrypt"; // You'll need this for password hashing
-import UserTokenService from "../utils/Auth.utils.js"
-import {inspectUserData, deleteSpecificUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
+import bcrypt from "bcrypt";
+import UserTokenService from "../utils/Auth.utils.js";
+import { inspectUserData, deleteSpecificUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
 import { OAuth2Client } from 'google-auth-library';
 import dotenv from "dotenv";
 import axios from 'axios';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { REDIS_KEYS } from "../constants/redisKeys.js";
+import  redisClient  from "../config/redis.js";
 
 dotenv.config({ path: "./src/.env" });
 
 const prisma = new PrismaClient();
 
+// Helper function to cache user data
+const cacheUserData = async (userId, userData) => {
+  try {
+    // Cache user data with the key format: "user:userId"
+    const userKey = `${REDIS_KEYS.USER}${userId}`;
+    await redisClient.set(userKey, JSON.stringify(userData));
+    // Set expiration time to 1 hour (3600 seconds)
+    await redisClient.expire(userKey, 3600);
+    return true;
+  } catch (error) {
+    console.error("Redis caching error:", error);
+    return false;
+  }
+};
+
+// Helper function to get cached user data
+const getCachedUserData = async (userId) => {
+  try {
+    const userKey = `${REDIS_KEYS.USER}${userId}`;
+    const cachedUser = await redisClient.get(userKey);
+    return cachedUser ? JSON.parse(cachedUser) : null;
+  } catch (error) {
+    console.error("Redis get error:", error);
+    return null;
+  }
+};
+// Helper function to invalidate user cache
+const invalidateUserCache = async (userId) => {
+  try {
+    const userKey = `${REDIS_KEYS.USER}${userId}`;
+    await redisClient.del(userKey);
+    return true;
+  } catch (error) {
+    console.error("Redis delete error:", error);
+    return false;
+  }
+};
+
 const deleteSpecificData = async (req, res) => {
   try {
-    const { userId, dataType } = req.body
+    const { userId, dataType } = req.body;
     console.log(userId);
     console.log(dataType);
     if (!userId || !dataType) {
       return res.status(400).json({ 
         message: 'User ID and Data Type are required' 
-      })
+      });
     }
+    
     let deletionResult = 0;
-    if(dataType === "watchHistory"){
-    deletionResult = await prisma[dataType].deleteMany({
+    if(dataType === "watchHistory") {
+      deletionResult = await prisma[dataType].deleteMany({
         where: { userId : userId },
-    });
-    }else{
-    deletionResult = await prisma[dataType].deleteMany({
-      where: { owner: userId },
-    });
-  }
+      });
+      
+      // Invalidate watch history cache
+      await redisClient.del(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
+    } else {
+      deletionResult = await prisma[dataType].deleteMany({
+        where: { owner: userId },
+      });
+      
+      // Invalidate relevant caches based on dataType
+      if (dataType === "videos") {
+        await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
+      } else if (dataType === "tweets") {
+        await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+      } else if (dataType === "comments") {
+        await redisClient.del(`${REDIS_KEYS.USER_COMMENTS}${userId}`);
+      } else if (dataType === "playlists") {
+        await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+      }
+    }
 
     res.status(200).json({
       message: `${dataType} deleted successfully`,
       details: deletionResult
-    })
+    });
   } catch (error) {
-    console.error('Delete Specific Data Error:', error)
+    console.error('Delete Specific Data Error:', error);
     res.status(500).json({ 
       message: `Failed to delete ${req.body.dataType}`,
       error: error.message
-    })
+    });
   }
-}
+};
 
 const inspectData = async (req, res) => {
   try {
@@ -61,14 +116,30 @@ const inspectData = async (req, res) => {
         message: 'User ID is required' 
       });
     }
+    
+    // Try to get from cache first
+    const cacheKey = `user_data_summary:${userId}`;
+    const cachedData = await redisClient.get(cacheKey);
+    
+    if (cachedData) {
+      return res.status(200).json({
+        message: 'User data summary retrieved from cache',
+        data: JSON.parse(cachedData)
+      });
+    }
+    
     const database = await getDatabaseName();
     const userDataSummary = await inspectUserData(userId);
+    
+    // Cache the result
+    await redisClient.set(cacheKey, JSON.stringify(userDataSummary));
+    // Set expiration time to 10 minutes (600 seconds)
+    await redisClient.expire(cacheKey, 600);
 
     res.status(200).json({
       message: 'User data summary retrieved',
       data: userDataSummary,
-      message:'Database name is :',
-      data : data
+      databaseName: database
     });
   } catch (error) {
     console.error('Inspect User Data Error:', error);
@@ -80,23 +151,65 @@ const inspectData = async (req, res) => {
 
 const generateAccessAndRefereshTokens = async (userId) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
+    // Try to get from cache first
+    const cachedUser = await getCachedUserData(userId);
+    
+    let user;
+    if (cachedUser) {
+      user = cachedUser;
+    } else {
+      user = await prisma.user.findUnique({
+        where: { id: userId }
+      });
+      
+      if (user) {
+        // Cache the user data
+        await cacheUserData(userId, user);
+      }
+    }
+    
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
     
     const accessToken = UserTokenService.generateAccessToken(user);
     const refreshToken = UserTokenService.generateRefreshToken(user);
-    // Update the user with the new refresh token
-    await prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken }
-    });
+    
+    // Add retry logic for database updates
+    let retries = 3;
+    let updated = false;
+    let lastError = null;
+    
+    while (retries > 0 && !updated) {
+      try {
+        // Update the user with the new refresh token
+        await prisma.user.update({
+          where: { id: userId },
+          data: { refreshToken }
+        });
+        updated = true;
+        
+        // Invalidate the user cache since we updated the refresh token
+        await invalidateUserCache(userId);
+      } catch (updateError) {
+        lastError = updateError;
+        retries--;
+        // Add a small delay before retrying
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    
+    if (!updated) {
+      console.error("Failed to update refresh token after retries:", lastError);
+      throw new ApiError(500, "Database update failed after multiple retries");
+    }
 
     return { accessToken, refreshToken };
   } catch (error) {
+    console.error("Token generation error:", error.message, error.stack);
     throw new ApiError(
       500,
-      "Something went wrong while generating refresh and access token"
+      `Something went wrong while generating refresh and access token: ${error.message}`
     );
   }
 };
@@ -187,6 +300,9 @@ const registerUser = asyncHandler(async (req, res) => {
   if (!createdUser) {
     throw new ApiError(500, "User registration failed");
   }
+  
+  // Cache the new user data
+  await cacheUserData(user.id, createdUser);
 
   return res
     .status(201)
@@ -237,6 +353,9 @@ const loginUser = asyncHandler(async (req, res) => {
       updatedAt: true
     }
   });
+  
+  // Cache the logged-in user data
+  await cacheUserData(user.id, loggedInUser);
 
   const options = {
     httpOnly: false,
@@ -269,6 +388,9 @@ const logoutUser = asyncHandler(async (req, res) => {
     where: { id: req.user.id },
     data: { refreshToken: null }
   });
+  
+  // Invalidate user cache on logout
+  await invalidateUserCache(req.user.id);
 
   const options = {
     httpOnly: true,
@@ -332,12 +454,23 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   }
 });
 
-
-
 const getCurrentUser = asyncHandler(async (req, res) => {
+  // Try to get from cache first
+  const cachedUser = await getCachedUserData(req.user.id);
+  
+  if (cachedUser) {
+    return res
+      .status(200)
+      .json(new ApiResponse(200, cachedUser, "User fetched from cache successfully"));
+  }
+  
+  // If not in cache, fetch from database and cache it
+  const user = req.user;
+  await cacheUserData(user.id, user);
+  
   return res
     .status(200)
-    .json(new ApiResponse(200, req.user, "User fetched successfully"));
+    .json(new ApiResponse(200, user, "User fetched successfully"));
 });
 
 const changeCurrentPassword = asyncHandler(async (req, res) => {
@@ -368,6 +501,9 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     where: { id: req.user.id },
     data: { password: hashedPassword }
   });
+  
+  // Invalidate user cache after password change
+  await invalidateUserCache(req.user.id);
 
   return res
     .status(200)
@@ -425,6 +561,9 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
       updatedAt: true
     }
   });
+  
+  // Update user cache with new details
+  await cacheUserData(userId, updatedUser);
 
   return res
     .status(200)
@@ -462,6 +601,9 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
       updatedAt: true
     }
   });
+  
+  // Update cache with new avatar
+  await cacheUserData(req.user.id, user);
 
   return res
     .status(200)
@@ -497,6 +639,9 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
       updatedAt: true
     }
   });
+  
+  // Update cache with new cover image
+  await cacheUserData(req.user.id, user);
 
   return res
     .status(200)
@@ -508,6 +653,19 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
   if (!username?.trim()) {
     throw new ApiError(400, "Username is missing");
+  }
+
+  // Try to get from cache first
+  const userCacheKey = `${REDIS_KEYS.USER}${username}`;
+  const cachedUser = await redisClient.get(userCacheKey);
+  
+  if (cachedUser) {
+    const channelData = JSON.parse(cachedUser);
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(200, channelData, "User channel fetched from cache successfully")
+      );
   }
 
   // Find the user and get their channel profile information
@@ -565,6 +723,9 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     channelsSubscribedToCount,
     isSubscribed
   };
+  
+  await redisClient.set(userCacheKey, JSON.stringify(channelProfile));
+  await redisClient.expire(userCacheKey, 1800);
 
   return res
     .status(200)
@@ -582,6 +743,16 @@ const getUser = asyncHandler(async (req, res) => {
   }
   
   try {
+    // Try to get from cache first
+    const userCacheKey = `${REDIS_KEYS.USER}${id}`;
+    const cachedUser = await redisClient.get(userCacheKey);
+    
+    if (cachedUser) {
+      return res.status(200).json(
+        new ApiResponse(200, JSON.parse(cachedUser), "User fetched from cache successfully")
+      );
+    }
+    
     // First try with the ID as is
     let user = await prisma.user.findUnique({
       where: { id },
@@ -590,17 +761,16 @@ const getUser = asyncHandler(async (req, res) => {
         username: true,
         fullName: true,
         avatar: true,
-        coverImage: true // Added this since it might be useful
+        coverImage: true
       }
     });
     
     // If user not found, try additional strategies for Google Auth IDs
     if (!user) {
       // If the ID might be in a different format (e.g., not ObjectId for Google Auth users)
-      // Log for debugging
       console.log(`User not found with ID: ${id}. Checking alternate formats.`);
       
-      // Option 1: Search by username if the ID might be a username
+      // Try searching by username
       user = await prisma.user.findUnique({
         where: { username: id },
         select: {
@@ -612,7 +782,7 @@ const getUser = asyncHandler(async (req, res) => {
         }
       });
       
-      // Option 2: If Option 1 fails, try searching by email if the ID might be an email
+      // If username search fails, try searching by email
       if (!user) {
         user = await prisma.user.findUnique({
           where: { email: id },
@@ -628,16 +798,20 @@ const getUser = asyncHandler(async (req, res) => {
       
       // If still no user found
       if (!user) {
-        // Log all users to check if there's any pattern in IDs
         const allUsers = await prisma.user.findMany({
           select: { id: true, username: true, email: true },
-          take: 5 // Limit to avoid huge logs
+          take: 5
         });
         console.log("Sample users in database:", allUsers);
         
         throw new ApiError(404, 'User not found');
       }
     }
+    
+    // Cache the user data
+    await redisClient.set(userCacheKey, JSON.stringify(user));
+    // Set expiration to 1 hour (3600 seconds)
+    await redisClient.expire(userCacheKey, 3600);
     
     return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"));
   } catch (error) {
@@ -653,6 +827,7 @@ const getUser = asyncHandler(async (req, res) => {
     throw new ApiError(500, `Failed to fetch user: ${error.message}`);
   }
 });
+
 const clearUserWatchHistory = asyncHandler(async (req, res) => {
   try {
     const userId = req.user.id;
@@ -661,6 +836,9 @@ const clearUserWatchHistory = asyncHandler(async (req, res) => {
     const deletedEntries = await prisma.watchHistory.deleteMany({
       where: { userId }
     });
+    
+    // Clear watch history cache
+    await redisClient.del(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
 
     return res.status(200).json(
       new ApiResponse(
@@ -677,6 +855,20 @@ const clearUserWatchHistory = asyncHandler(async (req, res) => {
 
 const getUserWatchHistory = asyncHandler(async (req, res) => {
   const userId = req.user.id;
+  
+  // Try to get from cache first
+  const watchHistoryCacheKey = `${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`;
+  const cachedWatchHistory = await redisClient.get(watchHistoryCacheKey);
+  
+  if (cachedWatchHistory) {
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        JSON.parse(cachedWatchHistory),
+        "Watch history fetched from cache successfully"
+      )
+    );
+  }
   
   // Get user's watch history with video details and channel info
   const watchHistory = await prisma.watchHistory.findMany({
@@ -702,6 +894,11 @@ const getUserWatchHistory = asyncHandler(async (req, res) => {
       }
     }
   });
+  
+  // Cache the watch history
+  await redisClient.set(watchHistoryCacheKey, JSON.stringify(watchHistory));
+  // Set expiration to 5 minutes (300 seconds) as watch history changes frequently
+  await redisClient.expire(watchHistoryCacheKey, 300);
 
   return res.status(200).json(
     new ApiResponse(
@@ -722,9 +919,23 @@ const createWatchHistoryEntry = asyncHandler(async (req, res) => {
   }
 
   // Check if video exists
-  const video = await prisma.video.findUnique({
-    where: { id: videoId }
-  });
+  const videoCacheKey = `${REDIS_KEYS.VIDEO}${videoId}`;
+  let video = await redisClient.get(videoCacheKey);
+  
+  if (!video) {
+    video = await prisma.video.findUnique({
+      where: { id: videoId }
+    });
+    
+    if (video) {
+      // Cache the video data
+      await redisClient.set(videoCacheKey, JSON.stringify(video));
+      // Set expiration to 1 hour (3600 seconds)
+      await redisClient.expire(videoCacheKey, 3600);
+    }
+  } else {
+    video = JSON.parse(video);
+  }
 
   if (!video) {
     throw new ApiError(404, "Video not found");
@@ -753,6 +964,9 @@ const createWatchHistoryEntry = asyncHandler(async (req, res) => {
         watchedAt: new Date() // Update the watched time to now
       }
     });
+    
+    // Invalidate watch history cache
+    await redisClient.del(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
 
     return res.status(200).json(
       new ApiResponse(
@@ -776,6 +990,10 @@ const createWatchHistoryEntry = asyncHandler(async (req, res) => {
     where: { id: videoId },
     data: { views: { increment: 1 } }
   });
+  
+  // Invalidate caches
+  await redisClient.del(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
+  await redisClient.del(videoCacheKey);
 
   return res.status(201).json(
     new ApiResponse(
