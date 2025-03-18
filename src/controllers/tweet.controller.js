@@ -10,28 +10,36 @@ const prisma = new PrismaClient();
 
 const incrementViewCount = asyncHandler(async(req, res) => {
   const { tweetId } = req.params;
+  const userId = req.user.id;
   
   try {
-    const tweet = await prisma.tweet.update({
+    // Use Redis for atomic increment
+    const viewKey = `${REDIS_KEYS.TWEET_VIEWS}${tweetId}`;
+    const currentViews = await redisClient.incr(viewKey);
+    
+    // Get the tweet details without updating the view count in DB
+    let tweet = await prisma.tweet.findUnique({
       where: {
         id: tweetId
-      },
-      data: {
-        views: {
-          increment: 1
-        }
       }
     });
     
     if (!tweet) {
-      throw new ApiError(404, "tweet not found");
+      throw new ApiError(404, "Tweet not found");
     }
     
+    // Return a modified tweet object with the Redis view count
+    tweet = {
+      ...tweet,
+      views: tweet.views + currentViews - 1 // Adjust for accurate display
+    };
+    
+    // Invalidate relevant caches
     await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
     await redisClient.del(`${REDIS_KEYS.ALL_TWEETS}`);
-    await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${req.user.id}`);
-    await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${req.user.id}`);
-
+    await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+    
     return res
       .status(200)
       .json(new ApiResponse(200, tweet, "View count incremented successfully"));  
@@ -40,7 +48,7 @@ const incrementViewCount = asyncHandler(async(req, res) => {
       throw new ApiError(400, "Invalid tweet ID format");
     }
     if (err.code === 'P2025') {
-      throw new ApiError(404, "tweet not found");
+      throw new ApiError(404, "Tweet not found");
     }
     throw new ApiError(500, err?.message || "Error incrementing view count");
   }
@@ -175,7 +183,7 @@ const getTweetById = asyncHandler(async (req, res) => {
       // Check if user is subscribed to the video owner
       const subscription = await prisma.subscription.findFirst({
         where: {
-          channelId: tweet.user.id,
+          userId: tweet.user.id,
           subscriberId: req.user.id
         }
       });

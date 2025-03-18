@@ -12,18 +12,22 @@ export const REDIS_KEYS = {
   USER_SUBSCRIBERS: "user_subscribers:",
   USER_WATCH_HISTORY: "user_watch_history:",
   USER_VIDEOS_BY_USERNAME: "user_videos_by_username",
+  USER_SUBSCRIPTION_STATE: 'user_subscription_state:',
+  PENDING_SUBSCRIPTION_CHANGES: 'pending_subscription_changes:',
   
   // Video-related keys
   VIDEO: "video:",
   VIDEO_COMMENTS: "video_comments:",
   VIDEO_LIKES: "video_likes:",
   ALL_VIDEOS: "all_videos",
+  VIDEO_VIEWS: 'video_views:',
   
   // Tweet-related keys
   TWEET: "tweet:",
   TWEET_COMMENTS: "tweet_comments:",
   TWEET_LIKES: "tweet_likes:",
   ALL_TWEETS: "all_tweets",
+  TWEET_VIEWS: 'tweet_views:',
   
   // Comment-related keys
   COMMENT: "comment:",
@@ -32,11 +36,5 @@ export const REDIS_KEYS = {
   // Playlist-related keys
   PLAYLIST: "playlist:",
   PLAYLIST_VIDEOS: "playlist_videos:",
-  
-  // Subscription-related keys
-  SUBSCRIPTION: "subscription:",
-  
-  // Watch history-related keys
-  WATCH_HISTORY: "watch_history:",
   
 };

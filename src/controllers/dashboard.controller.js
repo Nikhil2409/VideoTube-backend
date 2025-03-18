@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 
 const getChannelStats = asyncHandler(async (req, res) => {
   const { userId } = req.params;
-  const cacheKey = `${REDIS_KEYS.CHANNEL}${userId}:stats`;
+  const cacheKey = `${REDIS_KEYS.USER}${userId}:stats`;
 
   // Check Redis cache first
   const cachedStats = await redisClient.get(cacheKey);
@@ -19,7 +19,7 @@ const getChannelStats = asyncHandler(async (req, res) => {
 
   try {
     const totalVideos = await prisma.video.count({ where: { owner: userId } });
-    const totalSubscribers = await prisma.subscription.count({ where: { channelId: userId } });
+    const totalSubscribers = await prisma.subscription.count({ where: { userId: userId } });
     const videoIds = (await prisma.video.findMany({ where: { owner: userId }, select: { id: true } })).map(v => v.id);
     const totalLikes = await prisma.like.count({ where: { videoId: { in: videoIds } } });
     const totalViews = (await prisma.video.aggregate({ where: { owner: userId }, _sum: { views: true } }))._sum.views || 0;

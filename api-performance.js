@@ -19,169 +19,145 @@ const refreshTokens = {};
 
 // Real test users from your database
 const testUsers = [
-  { userId: '67c96ca2e0b2fa2d8bf744fd', username: 'nikhil1', email: 'nikhil1@mail.com', password: '12345678' },
-  { userId: '67c97b857e30c0f11f3765fe', username: 'nikhil2', email: 'nikhil2@mail.com', password: '12345678' },
-  { userId: '67cdf4e90db7e5326115ec22', username: 'nikhil3', email: 'nikhil3@mail.com', password: '12345678' },
-  { userId: '67ceb2cd42745b7ef73dc631', username: 'nikhil4', email: 'nikhil4@mail.com', password: '12345678' },
-  { userId: '67d74d9ad289a22511bcaf07', username: 'nikhiltest1', email: 'nikhiltest1@mail.com', password: '12345678'},
-  { userId: '67d74e51d289a22511bcaf08', username: 'nikhiltest2', email: 'nikhiltest2@mail.com', password: '12345678'},
-  { userId: '67d74e6dd289a22511bcaf09', username: 'nikhiltest3', email: 'nikhiltest3@mail.com', password: '12345678'},
-  { userId: '67d74e86d289a22511bcaf0a', username: 'nikhiltest4', email: 'nikhiltest4@mail.com', password: '12345678'},
+  { userId: '67d80f5e8cd85d232433a85d', username: 'nikhil1', email: 'nikhil1@mail.com', password: '12345678' },
+  { userId: '67d85c1773e3c76253b9d4cd', username: 'nikhil2', email: 'nikhil2@mail.com', password: '12345678' },
+  { userId: '67d95d9c5f669b7bae99b007', username: 'nikhil3', email: 'nikhil3@mail.com', password: '12345678' },
+  { userId: '67d95dae5f669b7bae99b008', username: 'nikhil4', email: 'nikhil4@mail.com', password: '12345678' }, // Fixed ID
+  { userId: '67d95dc25f669b7bae99b009', username: 'nikhil5', email: 'nikhil5@mail.com', password: '12345678'},
+  { userId: '67d95df95f669b7bae99b00a', username: 'nikhil6', email: 'nikhil6@mail.com', password: '12345678'},
+  { userId: '67d95e205f669b7bae99b00b', username: 'nikhil7', email: 'nikhil7@mail.com', password: '12345678'},
+  { userId: '67d95e4b5f669b7bae99b00c', username: 'nikhil8', email: 'nikhil8@mail.com', password: '12345678'},
 ];
 
 // Sample content data
 const contentData = {
-    videos: [
-    {
-      videoId: '67ceb2f742745b7ef73dc632',
-      videoTitle: 'n1',
-      videoDescription: 'n1 video',
-      videoFile: 'https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599477/videoTub…',
-      thumbnail: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599435/videoTub…',
-      duration: 3,
-      views: 10,
-      isPublished: true,
-      owner: '67ceb2cd42745b7ef73dc631', // nikhil4
-      createdAt: '2025-03-10T09:37:59.388+00:00',
-      updatedAt: '2025-03-16T14:24:06.315+00:00'
-    },
-    {
-      videoId: '67ceb39d42745b7ef73dc635',
-      videoTitle: 'n2',
-      videoDescription: 'n2 video description',
-      videoFile: 'https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599477/videoTub…',
-      thumbnail: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599533/videoTub…',
-      duration: 3,
-      views: 13,
-      isPublished: true,
-      owner: '67ceb2cd42745b7ef73dc631', // nikhil4
-      createdAt: '2025-03-10T09:40:45.036+00:00',
-      updatedAt: '2025-03-16T14:24:08.092+00:00'
-    },
-    {
-      videoId: '67ceb50142745b7ef73dc637',
-      videoTitle: 'n5',
-      videoDescription: 'n5 video',
-      videoFile: 'https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599998/videoTub…',
-      thumbnail: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1741600000/videoTub…',
-      duration: 15,
-      views: 10,
-      isPublished: true,
-      owner: '67cdf4e90db7e5326115ec22', // nikhil3
-      createdAt: '2025-03-10T09:46:41.506+00:00',
-      updatedAt: '2025-03-16T14:24:04.273+00:00'
-    },
-    {
-      videoId: '67ceca3d3c5348bd59f0d22e',
-      videoTitle: 'n6',
-      videoDescription: 'n6',
-      videoFile: 'https://res.cloudinary.com/dasnrzmvz/video/upload/v1741605435/videoTub…',
-      thumbnail: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1741605437/videoTub…',
-      duration: 5,
-      views: 11,
-      isPublished: true,
-      owner: '67cdf4e90db7e5326115ec22', // nikhil3
-      createdAt: '2025-03-10T11:17:17.718+00:00',
-      updatedAt: '2025-03-16T14:24:02.182+00:00'
-    },
+    "videos": [
+      {
+        "videoId": "67d81163cdbdfaf39b16f39e",
+        "videoTitle": "v1",
+        "videoDescription": "v1",
+        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599477/videoTub…",
+        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599533/videoTub…",
+        "duration": 3,
+        "views": 148,
+        "isPublished": true,
+        "owner": "67d80f5e8cd85d232433a85d",
+        "createdAt": "2025-03-17T12:11:15.595+00:00",
+        "updatedAt": "2025-03-18T09:41:48.061+00:00"
+      },
+      {
+        "videoId": "67d88ec78c59701de6498f5c",
+        "videoTitle": "v1",
+        "videoDescription": "v1",
+        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741605435/videoTub…",
+        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1742245572/videoTub…",
+        "duration": 5,
+        "views": 19,
+        "isPublished": true,
+        "owner": "67d85c1773e3c76253b9d4cd",
+        "createdAt": "2025-03-17T21:06:15.224+00:00",
+        "updatedAt": "2025-03-18T11:46:53.155+00:00"
+      },
+      {
+        "videoId": "67d95b72a7dca3f7a0fc4fd5",
+        "videoTitle": "v2",
+        "videoDescription": "v2",
+        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1742297968/videoTub…",
+        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599435/videoTub…",
+        "duration": 6,
+        "views": 0,
+        "isPublished": true,
+        "owner": "67d85c1773e3c76253b9d4cd",
+        "createdAt": "2025-03-18T11:39:30.559+00:00",
+        "updatedAt": "2025-03-18T11:39:30.559+00:00"
+      },
+      {
+        "videoId": "67d95b92a7dca3f7a0fc4fd7",
+        "videoTitle": "v3",
+        "videoDescription": "v3",
+        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599998/videoTub…",
+        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741618351/videoTub…",
+        "duration": 15,
+        "views": 0,
+        "isPublished": true,
+        "owner": "67d85c1773e3c76253b9d4cd",
+        "createdAt": "2025-03-18T11:40:02.223+00:00",
+        "updatedAt": "2025-03-18T11:40:02.223+00:00"
+      },
+      {
+        "videoId": "67d95d6f5f669b7bae99b004",
+        "videoTitle": "video2",
+        "videoDescription": "video2",
+        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599998/videoTub…",
+        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599435/videoTub…",
+        "duration": 15,
+        "views": 0,
+        "isPublished": true,
+        "owner": "67d80f5e8cd85d232433a85d",
+        "createdAt": "2025-03-18T11:47:59.562+00:00",
+        "updatedAt": "2025-03-18T11:47:59.562+00:00"
+      }
     ], tweets: [
-    // Tweets
-    {
-      tweetId: '67ce118c0db7e5326115ec2d',
-      content: 'hello there',
-      views: 0,
-      isPublished: true,
-      owner: '67cdf4e90db7e5326115ec22', // nikhil3
-      createdAt: '2025-03-09T22:09:16.778+00:00',
-      updatedAt: '2025-03-09T22:09:16.778+00:00'
-    },
-    {
-      tweetId: '67ceb32e42745b7ef73dc634',
-      content: 'hello there',
-      views: 12,
-      isPublished: true,
-      image: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599533/videoTub…',
-      owner: '67ceb2cd42745b7ef73dc631', // nikhil4
-      createdAt: '2025-03-10T09:38:54.343+00:00',
-      updatedAt: '2025-03-16T16:14:30.466+00:00'
-    },
-    {
-      tweetId: '67d6d8aea6af7fd66f790627',
-      content: 'hey',
-      views: 7,
-      isPublished: true,
-      image: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599533/videoTub…',
-      owner: '67c97b857e30c0f11f3765fe', // nikhil2
-      createdAt: '2025-03-16T13:57:02.879+00:00',
-      updatedAt: '2025-03-16T16:14:27.059+00:00'
-    },
-    {
-      tweetId: '67d72b051307b1fb07454e3a',
-      content: 'Performance test tweet from nikhil2 at 2025-03-16T19:48:21.034Z',
-      views: 0,
-      isPublished: true,
-      owner: '67c97b857e30c0f11f3765fe', // nikhil2
-      createdAt: '2025-03-16T19:48:21.066+00:00',
-      updatedAt: '2025-03-16T19:48:21.066+00:00'
-    },
-], playlists: [
-    // Playlists
-    {
-      playlistId: '67caf7607a4192e05f96a306',
-      name: 'playlist1',
-      description: 'description of playlist1',
-      owner: '67c96ca2e0b2fa2d8bf744fd', // nikhil1
-      videoIds: [], // Array (4) - actual IDs not provided
-      createdAt: '2025-03-07T13:40:48.811+00:00',
-      updatedAt: '2025-03-09T12:56:13.765+00:00'
-    },
-    {
-      playlistId: '67cecaca3c5348bd59f0d237',
-      name: 'playlist1',
-      description: 'playlist1',
-      owner: '67cdf4e90db7e5326115ec22', // nikhil3
-      videoIds: [], // Array (2) - actual IDs not provided
-      createdAt: '2025-03-10T11:19:38.466+00:00',
-      updatedAt: '2025-03-10T11:19:38.466+00:00'
-    },
-], subscriptions: [
-    // Subscriptions
-    {
-      subscriptionId: '67c97b917e30c0f11f376601',
-      subscriberId: '67c97b857e30c0f11f3765fe', // nikhil2
-      channelId: '67c96ca2e0b2fa2d8bf744fd', // nikhil1
-      createdAt: '2025-03-06T10:40:17.476+00:00',
-      updatedAt: '2025-03-06T10:40:17.476+00:00'
-    },
-    {
-      subscriptionId: '67cdf50b0db7e5326115ec28',
-      subscriberId: '67cdf4e90db7e5326115ec22', // nikhil3
-      channelId: '67c96ca2e0b2fa2d8bf744fd', // nikhil1
-      createdAt: '2025-03-09T20:07:39.469+00:00',
-      updatedAt: '2025-03-09T20:07:39.469+00:00'
-    },
-    {
-      subscriptionId: '67cecb0a3c5348bd59f0d238',
-      subscriberId: '67c96ca2e0b2fa2d8bf744fd', // nikhil1
-      channelId: '67cdf4e90db7e5326115ec22', // nikhil3
-      createdAt: '2025-03-10T11:20:42.652+00:00',
-      updatedAt: '2025-03-10T11:20:42.652+00:00'
-    },
-    {
-      subscriptionId: '67cecb6e3c5348bd59f0d23b',
-      subscriberId: '67cdf4e90db7e5326115ec22', // nikhil3
-      channelId: '67c97b857e30c0f11f3765fe', // nikhil2
-      createdAt: '2025-03-10T11:22:22.224+00:00',
-      updatedAt: '2025-03-10T11:22:22.224+00:00'
-    },
-    {
-      subscriptionId: '67d72b071307b1fb07454e3b',
-      subscriberId: '67c97b857e30c0f11f3765fe', // nikhil2
-      channelId: '67cdf4e90db7e5326115ec22', // nikhil3
-      createdAt: '2025-03-16T19:48:23.484+00:00',
-      updatedAt: '2025-03-16T19:48:23.484+00:00'
-    }
-],
+      {
+        tweetId: '67d85146d710603ea9b6a175',
+        content: 'hey',
+        views: 141,
+        isPublished: true,
+        owner: '67d80f5e8cd85d232433a85d',
+        createdAt: '2025-03-17T16:43:50.184+00:00',
+        updatedAt: '2025-03-18T11:02:03.327+00:00'
+      },
+      {
+        tweetId: '67d94cb02e0efe68b9287b23',
+        content: 'hey',
+        views: 5,
+        isPublished: true,
+        image: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1742245572/videoTub…',
+        owner: '67d85c1773e3c76253b9d4cd',
+        createdAt: '2025-03-18T10:36:32.742+00:00',
+        updatedAt: '2025-03-18T11:02:11.445+00:00'
+      },
+      {
+        tweetId: '67d9605ff8ba4b4f989cd56e',
+        content: 'tweet1',
+        views: 2,
+        isPublished: true,
+        image: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1742298697/videoTub…',
+        owner: '67d95e205f669b7bae99b00b',
+        createdAt: '2025-03-18T12:00:31.816+00:00',
+        updatedAt: '2025-03-18T12:00:32.357+00:00'
+      },
+      {
+        tweetId: '67d96088f8ba4b4f989cd573',
+        content: 'tweet2',
+        views: 1,
+        isPublished: true,
+        image: 'https://res.cloudinary.com/dasnrzmvz/image/upload/v1742134851/videoTub…',
+        owner: '67d95d9c5f669b7bae99b007',
+        createdAt: '2025-03-18T12:01:12.336+00:00',
+        updatedAt: '2025-03-18T12:01:12.769+00:00'
+      }
+  ],
+  playlists: [
+      {
+        playlistId: '67d8993600c19e272c58cd81',
+        name: 'playlist1',
+        description: 'pp',
+        owner: '67d80f5e8cd85d232433a85d',
+        videoIds: [], // Array (2) - actual IDs not provided
+        createdAt: '2025-03-17T21:50:46.017+00:00',
+        updatedAt: '2025-03-18T11:48:06.413+00:00'
+      },
+      {
+        playlistId: '67d93678db6c1c871211a3c6',
+        name: 'playlist1',
+        description: 'mm',
+        owner: '67d85c1773e3c76253b9d4cd',
+        videoIds: [], // Array (1) - actual IDs not provided
+        createdAt: '2025-03-18T09:01:44.294+00:00',
+        updatedAt: '2025-03-18T09:01:44.294+00:00'
+      }
+  ],  
 };
 
 // Helper function to pick a random item from an array
@@ -509,36 +485,38 @@ export default function() {
 
   sleep(Math.random() * 0.5);
 
-  // Channel subscription activity
-  group('Subscriptions', function() {
-    // Subscribe to a channel (moderate frequency)
-    if (Math.random() < 0.3) {
-      const otherUser = testUsers[(userIndex + 1) % testUsers.length];
-      const subscriptionStart = new Date().getTime();
-      const subscriptionRes = http.post(`${baseUrl}/subscriptions/c/${otherUser.userId}`, {}, params);
-      subscriptionTrend.add(new Date().getTime() - subscriptionStart);
-      
-      check(subscriptionRes, {
-        'subscription operation successful': (r) => r.status === 200 || r.status === 201,
-      }) || errorRate.add(1);
-    }
-
-    // Get subscribed channels (high frequency)
-    const subscribedStart = new Date().getTime();
-    const subscribedRes = http.get(`${baseUrl}/subscriptions`, params);
-    subscriptionTrend.add(new Date().getTime() - subscribedStart);
+// Channel subscription activity
+group('Subscriptions', function() {
+  // Subscribe to a channel (moderate frequency)
+  if (Math.random() < 0.3) {
+    const otherUser = testUsers[(userIndex + 1) % testUsers.length];
+    const subscriptionStart = new Date().getTime();
     
-    check(subscribedRes, {
-      'subscribed channels fetch successful': (r) => r.status === 200,
+    const subscriptionRes = http.post(`${baseUrl}/subscriptions/c/${otherUser.userId}`, {}, params);
+    
+    subscriptionTrend.add(new Date().getTime() - subscriptionStart);
+    
+    check(subscriptionRes, {
+      'subscription operation successful': (r) => r.status === 200 || r.status === 201,
     }) || errorRate.add(1);
-  });
+  }
+
+  // Get subscribed channels (high frequency)
+  const subscribedStart = new Date().getTime();
+  const subscribedRes = http.get(`${baseUrl}/subscriptions`, params);
+  subscriptionTrend.add(new Date().getTime() - subscribedStart);
+  
+  check(subscribedRes, {
+    'subscribed channels fetch successful': (r) => r.status === 200,
+  }) || errorRate.add(1);
+});
 
   sleep(Math.random() * 0.5);
 
 // Playlist operations
 group('Playlists', function() {
     // Get user playlists (moderate frequency)
-    if (Math.random() < 0.4) {
+    if (Math.random() < 0.05) {
       const playlistsStart = new Date().getTime();
       const playlistsRes = http.get(`${baseUrl}/playlist/user/${user.userId}`, params);
       playlistTrend.add(new Date().getTime() - playlistsStart);

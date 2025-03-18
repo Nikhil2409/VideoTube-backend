@@ -61,39 +61,129 @@ const invalidateUserCache = async (userId) => {
 const deleteSpecificData = async (req, res) => {
   try {
     const { userId, dataType } = req.body;
-    console.log(userId);
-    console.log(dataType);
+    console.log("Deleting data for:", userId, dataType);
+    
     if (!userId || !dataType) {
       return res.status(400).json({ 
         message: 'User ID and Data Type are required' 
       });
     }
     
+    let itemsToDelete = [];
     let deletionResult = 0;
+    
+    // Special handling for watchHistory
     if(dataType === "watchHistory") {
       deletionResult = await prisma[dataType].deleteMany({
-        where: { userId : userId },
+        where: { userId: userId }
       });
       
-      // Invalidate watch history cache
-      await redisClient.del(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
+      console.log("WatchHistory DB deletion result:", deletionResult);
+      
+      // Direct Redis operations for watchHistory
+      const watchHistoryKey = `${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`;
+      console.log("Deleting Redis key:", watchHistoryKey);
+      await redisClient.del(watchHistoryKey);
+      
+      const watchHistoryKeys = await redisClient.keys(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}_p*`);
+      console.log("Found paginated keys:", watchHistoryKeys);
+      
+      if (watchHistoryKeys.length > 0) {
+        const delResult = await redisClient.del(watchHistoryKeys);
+        console.log("Deleted paginated keys result:", delResult);
+      }
     } else {
-      deletionResult = await prisma[dataType].deleteMany({
+      // For other data types
+      itemsToDelete = await prisma[dataType].findMany({
         where: { owner: userId },
+        select: { id: true }
       });
       
-      // Invalidate relevant caches based on dataType
-      if (dataType === "videos") {
-        await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
-      } else if (dataType === "tweets") {
-        await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
-      } else if (dataType === "comments") {
-        await redisClient.del(`${REDIS_KEYS.USER_COMMENTS}${userId}`);
-      } else if (dataType === "playlists") {
-        await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+      const itemIds = itemsToDelete.map(item => item.id);
+      console.log(`Found ${itemIds.length} ${dataType} to delete:`, itemIds);
+      
+      deletionResult = await prisma[dataType].deleteMany({
+        where: { owner: userId }
+      });
+      
+      console.log(`${dataType} DB deletion result:`, deletionResult);
+      
+      try {
+        // Get the correct Redis key name with singular/plural handling
+        let redisKeyName;
+        if (dataType === "playlist") {
+          redisKeyName = 'USER_PLAYLISTS'; // Handle pluralization difference
+        } else if (dataType === "video") {
+          redisKeyName = 'USER_VIDEOS';
+        } else if (dataType === "tweet") {
+          redisKeyName = 'USER_TWEETS';
+        } else if (dataType === "comment") {
+          redisKeyName = 'USER_COMMENTS';
+        } else {
+          redisKeyName = 'USER_' + dataType.toUpperCase();
+        }
+        
+        // Check if the key exists in REDIS_KEYS
+        if (!REDIS_KEYS[redisKeyName]) {
+          console.warn(`Redis key not found for: ${redisKeyName}. Skipping Redis cleanup.`);
+        } else {
+          // Delete main list key
+          const mainListKey = `${REDIS_KEYS[redisKeyName]}${userId}`;
+          console.log("Deleting main list key:", mainListKey);
+          await redisClient.del(mainListKey);
+          
+          // Delete paginated keys using the validated redisKeyName
+          const paginatedKeys = await redisClient.keys(`${REDIS_KEYS[redisKeyName]}${userId}_p*`);
+          console.log("Found paginated keys:", paginatedKeys);
+          
+          if (paginatedKeys.length > 0) {
+            for (const key of paginatedKeys) {
+              console.log("Deleting paginated key:", key);
+              await redisClient.del(key);
+            }
+          }
+        }
+        
+        // Handle individual item caches
+        if (dataType === "videos" || dataType === "video") {
+          for (const id of itemIds) {
+            console.log("Deleting video cache for ID:", id);
+            await redisClient.del(`${REDIS_KEYS.VIDEO}${id}`);
+            await redisClient.del(`${REDIS_KEYS.VIDEO_COMMENTS}${id}`);
+            await redisClient.del(`${REDIS_KEYS.VIDEO_LIKES}${id}`);
+          }
+          
+          console.log("Deleting trending videos cache");
+          await redisClient.del(REDIS_KEYS.TRENDING_VIDEOS);
+          
+          console.log("Deleting search results cache");
+          const searchKeys = await redisClient.keys(`${REDIS_KEYS.SEARCH_RESULTS_VIDEOS}*`);
+          if (searchKeys.length > 0) {
+            await redisClient.del(searchKeys);
+          }
+          
+        } else if (dataType === "tweets" || dataType === "tweet") {
+          for (const id of itemIds) {
+            console.log("Deleting tweet cache for ID:", id);
+            await redisClient.del(`${REDIS_KEYS.TWEET}${id}`);
+            await redisClient.del(`${REDIS_KEYS.TWEET_LIKES}${id}`);
+            await redisClient.del(`${REDIS_KEYS.TWEET_COMMENTS}${id}`);
+          }
+          
+        } else if (dataType === "playlists" || dataType === "playlist") {
+          // Then delete all other playlist keys
+          for (const id of itemIds) {
+            console.log("Deleting playlist cache for ID:", id);
+            await redisClient.del(`${REDIS_KEYS.PLAYLIST}${id}`);
+            await redisClient.del(`${REDIS_KEYS.PLAYLIST_VIDEOS}${id}`);
+          }
+        }
+      } catch (redisError) {
+        console.error("Redis operation failed:", redisError);
+        // Continue execution, don't throw the error
       }
     }
-
+    
     res.status(200).json({
       message: `${dataType} deleted successfully`,
       details: deletionResult
@@ -650,6 +740,7 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
 
 const getUserChannelProfile = asyncHandler(async (req, res) => {
   const { username } = req.params;
+  const currentUserId = req.user?.id;
 
   if (!username?.trim()) {
     throw new ApiError(400, "Username is missing");
@@ -659,12 +750,49 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
   const userCacheKey = `${REDIS_KEYS.USER}${username}`;
   const cachedUser = await redisClient.get(userCacheKey);
   
+  let channelProfile;
+  
   if (cachedUser) {
-    const channelData = JSON.parse(cachedUser);
+    channelProfile = JSON.parse(cachedUser);
+    
+    // If there's a logged-in user, we need to check subscription state separately
+    // as it might have changed since the profile was cached
+    if (currentUserId) {
+      const userId = channelProfile.id;
+      
+      // Get subscription state from Redis cache first
+      const subscriptionCacheKey = `${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${currentUserId}_${userId}`;
+      const cachedState = await redisClient.get(subscriptionCacheKey);
+      
+      if (cachedState !== null) {
+        // We have cached subscription state, use it
+        channelProfile.isSubscribed = cachedState === "true";
+      } else {
+        // No cached state, check the database
+        const subscription = await prisma.subscription.findUnique({
+          where: {
+            subscriberId_userId: {
+              subscriberId: currentUserId,
+              userId
+            }
+          }
+        });
+        
+        // Cache the result for future requests
+        await redisClient.set(subscriptionCacheKey, subscription ? "true" : "false");
+        
+        // Update the channel profile
+        channelProfile.isSubscribed = !!subscription;
+      }
+    } else {
+      // No logged-in user, so they're definitely not subscribed
+      channelProfile.isSubscribed = false;
+    }
+    
     return res
       .status(200)
       .json(
-        new ApiResponse(200, channelData, "User channel fetched from cache successfully")
+        new ApiResponse(200, channelProfile, "User channel fetched from cache successfully")
       );
   }
 
@@ -678,8 +806,6 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
       avatar: true,
       coverImage: true,
       email: true,
-      subscribers: true,
-      subscribedTo: true,
     }
   });
   
@@ -689,7 +815,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
   // Count subscribers
   const subscribersCount = await prisma.subscription.count({
-    where: { channelId: user.id }
+    where: { userId: user.id }
   });
 
   // Count channels subscribed to
@@ -699,20 +825,35 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 
   // Check if the requesting user is subscribed to this channel
   let isSubscribed = false;
-  if (req.user?.id) {
-    const subscription = await prisma.subscription.findUnique({
-      where: {
-        subscriberId_channelId: {
-          subscriberId: req.user.id,
-          channelId: user.id
+  
+  if (currentUserId && currentUserId !== user.id) {
+    // First check Redis for subscription state
+    const subscriptionCacheKey = `${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${currentUserId}_${user.id}`;
+    const cachedState = await redisClient.get(subscriptionCacheKey);
+    
+    if (cachedState !== null) {
+      // We have cached state
+      isSubscribed = cachedState === "true";
+    } else {
+      // Check the database
+      const subscription = await prisma.subscription.findUnique({
+        where: {
+          subscriberId_userId: {
+            subscriberId: currentUserId,
+            userId: user.id
+          }
         }
-      }
-    });
-    isSubscribed = !!subscription;
+      });
+      
+      isSubscribed = !!subscription;
+      
+      // Cache the result for future requests
+      await redisClient.set(subscriptionCacheKey, isSubscribed ? "true" : "false");
+    }
   }
 
   // Construct response object
-  const channelProfile = {
+  channelProfile = {
     id: user.id,
     fullName: user.fullName,
     username: user.username,
@@ -724,8 +865,11 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     isSubscribed
   };
   
-  await redisClient.set(userCacheKey, JSON.stringify(channelProfile),{EX: 3600});
-  await redisClient.expire(userCacheKey, 1800);
+  // Store in cache without the isSubscribed field since that's user-specific
+  const cacheableProfile = {...channelProfile};
+  delete cacheableProfile.isSubscribed;
+  
+  await redisClient.set(userCacheKey, JSON.stringify(cacheableProfile), {EX: 3600});
 
   return res
     .status(200)

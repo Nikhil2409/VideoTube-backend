@@ -8,32 +8,33 @@ import { REDIS_KEYS } from "../constants/redisKeys.js";
 const prisma = new PrismaClient();
 
 const toggleSubscription = asyncHandler(async (req, res) => {
-  const { channelId } = req.params;
+  const { userId } = req.params;
   const subscriberId = req.user.id;
-  if (!channelId) {
-    throw new ApiError(400, "Channel ID is required");
+
+  if (!userId) {
+    throw new ApiError(400, "user is required");
   }
 
   try {
     // Check if channel exists
-    const channel = await prisma.user.findUnique({
-      where: { id: channelId }
-    });
-    
-    if (!channel) {
-      throw new ApiError(404, "Channel not found");
-    }
-    
-    if (channelId === subscriberId) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+  });
+
+  if (!user) {
+    throw new ApiError(404, "user not found");
+  }
+
+    if (userId === subscriberId) {
       throw new ApiError(400, "You cannot subscribe to your own channel");
     }
     
     // Check if already subscribed
     const existingSubscription = await prisma.subscription.findUnique({
       where: {
-        subscriberId_channelId: {
-          subscriberId: subscriberId,
-          channelId: channelId
+        subscriberId_userId: {
+          subscriberId,
+          userId
         }
       }
     });
@@ -52,12 +53,12 @@ const toggleSubscription = asyncHandler(async (req, res) => {
       
       // Clear ALL related caches
       await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
-      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}`);
-      await redisClient.del(`${REDIS_KEYS.USER}${channel.username}`);
+      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`);
+      await redisClient.del(`${REDIS_KEYS.USER}${user.username}`);
       
       // Clear paginated caches too (pattern deletion)
       const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
-      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}_p*`);
+      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_p*`);
       
       if (subscriptionKeys.length > 0) {
         await redisClient.del(subscriptionKeys);
@@ -74,28 +75,28 @@ const toggleSubscription = asyncHandler(async (req, res) => {
       const subscription = await prisma.subscription.create({
         data: {
           subscriberId: subscriberId,
-          channelId: channelId
+          userId: userId
         }
       });
       
       result = { subscribed: true, success: true };
-      
+    
       // Clear ALL related caches
       await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
-      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}`);
-      await redisClient.del(`${REDIS_KEYS.USER}${channel.username}`);
-      
+      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`);
+      await redisClient.del(`${REDIS_KEYS.USER}${user.username}`);
+
       // Clear paginated caches too (pattern deletion)
-      const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
-      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${channelId}_p*`);
-      
-      if (subscriptionKeys.length > 0) {
-        await redisClient.del(subscriptionKeys);
-      }
-      if (subscriberKeys.length > 0) {
-        await redisClient.del(subscriberKeys);
-      }
-      
+    const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
+      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_p*`);
+
+    if (subscriptionKeys.length > 0) {
+      await redisClient.del(subscriptionKeys);
+    }
+    if (subscriberKeys.length > 0) {
+      await redisClient.del(subscriberKeys);
+    }
+
       return res.status(200).json(
         new ApiResponse(200, result, "Subscribed successfully")
       );
@@ -140,7 +141,7 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
     }
 
     const subscriptions = await prisma.subscription.findMany({
-      where: { channelId: userId },
+      where: { userId: userId },
       include: {
         subscriber: {
           select: {
@@ -159,7 +160,7 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
     });
 
     const totalSubscribers = await prisma.subscription.count({
-      where: { channelId: userId }
+      where: { userId: userId }
     });
 
     const subscribers = subscriptions.map(sub => ({
@@ -238,7 +239,7 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
     const subscriptions = await prisma.subscription.findMany({
       where: { subscriberId: userId },
       include: {
-        channel: {
+        user: {
           select: {
             id: true,
             username: true,
@@ -259,17 +260,17 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
       where: { subscriberId: userId }
     });
     
-    const channels = subscriptions.map(sub => ({
-      id: sub.channel.id,
-      username: sub.channel.username,
-      fullName: sub.channel.fullName,
-      avatar: sub.channel.avatar,
-      coverImage: sub.channel.coverImage,
+    const users = subscriptions.map(sub => ({
+      id: sub.user.id,
+      username: sub.user.username,
+      fullName: sub.user.fullName,
+      avatar: sub.user.avatar,
+      coverImage: sub.user.coverImage,
       subscribedAt: sub.createdAt
     }));
     
     const responseData = { 
-      channels,
+      users,
       totalSubscriptions,
       page: parseInt(page),
       limit: parseInt(limit),

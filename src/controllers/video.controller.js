@@ -65,19 +65,19 @@ const incrementViewCount = asyncHandler(async(req, res) => {
   const userId = req.user.id;
   
   try {
-    const video = await prisma.video.update({
+    // Use Redis for atomic increment
+    const viewKey = `${REDIS_KEYS.VIDEO_VIEWS}${videoId}`;
+    const currentViews = await redisClient.incr(viewKey);
+    
+    // Get the video details without updating the view count in DB
+    let video = await prisma.video.findUnique({
       where: {
         id: videoId
-      },
-      data: {
-        views: {
-          increment: 1
-        }
       },
       include: {
         user: {
           select: {
-            username:true,
+            username: true,
           }
         }
       }
@@ -86,8 +86,14 @@ const incrementViewCount = asyncHandler(async(req, res) => {
     if (!video) {
       throw new ApiError(404, "Video not found");
     }
-
-    // Invalidate video cache since view count changed
+    
+    // Return a modified video object with the Redis view count
+    video = {
+      ...video,
+      views: video.views + currentViews - 1 // Adjust for accurate display
+    };
+    
+    // Invalidate relevant caches
     await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
     await redisClient.del(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
     await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`);
@@ -286,7 +292,7 @@ const getVideoById = asyncHandler(async (req, res) => {
       // Check if user is subscribed to the video owner
       const subscription = await prisma.subscription.findFirst({
         where: {
-          channelId: video.user.id,
+          userId: video.user.id,
           subscriberId: req.user.id
         }
       });

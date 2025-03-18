@@ -3,7 +3,8 @@ import cors from "cors"
 import cookieParser from "cookie-parser"
 import { createServer } from "http"
 import { Server } from "socket.io"
-import redisClient from "./config/redis.js"
+import cron from "node-cron"
+import { flushVideoViewCountsToDB, flushTweetViewCountsToDB } from "./utils/dbUpdates.js"
 
 // Initialize Express app
 const app = express()
@@ -19,6 +20,13 @@ const io = new Server(httpServer, {
     methods: ["GET", "POST"]
   }
 })
+
+cron.schedule('*/2 * * * *', async () => {
+  console.log('Running scheduled view count flush to database...');
+  await flushVideoViewCountsToDB();
+  console.log('Running scheduled tweet view count flush to database...');
+  await flushTweetViewCountsToDB();
+});
 
 // CORS and other middleware setup
 app.use(cors({
