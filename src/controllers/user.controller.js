@@ -25,7 +25,7 @@ const cacheUserData = async (userId, userData) => {
   try {
     // Cache user data with the key format: "user:userId"
     const userKey = `${REDIS_KEYS.USER}${userId}`;
-    await redisClient.set(userKey, JSON.stringify(userData));
+    await redisClient.set(userKey, JSON.stringify(userData),{EX: 3600});
     // Set expiration time to 1 hour (3600 seconds)
     await redisClient.expire(userKey, 3600);
     return true;
@@ -132,7 +132,7 @@ const inspectData = async (req, res) => {
     const userDataSummary = await inspectUserData(userId);
     
     // Cache the result
-    await redisClient.set(cacheKey, JSON.stringify(userDataSummary));
+    await redisClient.set(cacheKey, JSON.stringify(userDataSummary),{EX: 3600});
     // Set expiration time to 10 minutes (600 seconds)
     await redisClient.expire(cacheKey, 600);
 
@@ -724,7 +724,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     isSubscribed
   };
   
-  await redisClient.set(userCacheKey, JSON.stringify(channelProfile));
+  await redisClient.set(userCacheKey, JSON.stringify(channelProfile),{EX: 3600});
   await redisClient.expire(userCacheKey, 1800);
 
   return res
@@ -809,7 +809,7 @@ const getUser = asyncHandler(async (req, res) => {
     }
     
     // Cache the user data
-    await redisClient.set(userCacheKey, JSON.stringify(user));
+    await redisClient.set(userCacheKey, JSON.stringify(user),{EX: 3600});
     // Set expiration to 1 hour (3600 seconds)
     await redisClient.expire(userCacheKey, 3600);
     
@@ -896,7 +896,7 @@ const getUserWatchHistory = asyncHandler(async (req, res) => {
   });
   
   // Cache the watch history
-  await redisClient.set(watchHistoryCacheKey, JSON.stringify(watchHistory));
+  await redisClient.set(watchHistoryCacheKey, JSON.stringify(watchHistory),{EX: 3600});
   // Set expiration to 5 minutes (300 seconds) as watch history changes frequently
   await redisClient.expire(watchHistoryCacheKey, 300);
 
@@ -929,7 +929,7 @@ const createWatchHistoryEntry = asyncHandler(async (req, res) => {
     
     if (video) {
       // Cache the video data
-      await redisClient.set(videoCacheKey, JSON.stringify(video));
+      await redisClient.set(videoCacheKey, JSON.stringify(video),{EX: 3600});
       // Set expiration to 1 hour (3600 seconds)
       await redisClient.expire(videoCacheKey, 3600);
     }

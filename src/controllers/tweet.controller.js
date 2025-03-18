@@ -24,7 +24,7 @@ const incrementViewCount = asyncHandler(async(req, res) => {
     });
     
     if (!tweet) {
-      throw new ApiError(404, "Video not found");
+      throw new ApiError(404, "tweet not found");
     }
     
     await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
@@ -37,10 +37,10 @@ const incrementViewCount = asyncHandler(async(req, res) => {
       .json(new ApiResponse(200, tweet, "View count incremented successfully"));  
   } catch(err) {
     if (err.code === 'P2023') {
-      throw new ApiError(400, "Invalid video ID format");
+      throw new ApiError(400, "Invalid tweet ID format");
     }
     if (err.code === 'P2025') {
-      throw new ApiError(404, "Video not found");
+      throw new ApiError(404, "tweet not found");
     }
     throw new ApiError(500, err?.message || "Error incrementing view count");
   }
@@ -105,7 +105,12 @@ const getTweetById = asyncHandler(async (req, res) => {
             id: true,
             username: true,
             fullName: true,
-            avatar: true
+            avatar: true,
+            subscribers: { 
+              select: {
+                id: true
+              }
+            }
           }
         },
         comments: {
@@ -130,27 +135,60 @@ const getTweetById = asyncHandler(async (req, res) => {
                 id: true,
                 username: true,
                 fullName: true,
-                avatar: true
+                avatar: true,
               }
             }
           }
         }
       }
     });
-
+    
     if (!tweet) {
       throw new ApiError(404, "Tweet not found");
     }
+    const ownerData = {
+      id: tweet.user.id,
+      username: tweet.user.username,
+      fullName: tweet.user.fullName,
+      avatar: tweet.user.avatar,
+      subscribersCount: tweet.user.subscribers?.length,
+      isSubscribed: false
+    };
 
     const tweetResponse = {
       ...tweet,
+      comments: tweet.comments,
+      likes: tweet.likes,
       likesCount: tweet.likes.length,
       commentsCount: tweet.comments.length,
-      isLiked: req.user ? tweet.likes.some(like => like.user.id === req.user.id) : false
+      isLiked: req.user ? tweet.likes.some(like => like.user.id === req.user.id) : false,
+      owner: ownerData,
+      createdAt: tweet.createdAt
     };
 
-    await redisClient.set(`${REDIS_KEYS.TWEET}${tweetId}`, JSON.stringify(tweetResponse));
+    delete tweetResponse.user;
 
+    if (req.user) {
+      const likeExists = tweet.likes.some(like => like.user.id === req.user.id);
+      tweetResponse.isLiked = likeExists;
+
+      // Check if user is subscribed to the video owner
+      const subscription = await prisma.subscription.findFirst({
+        where: {
+          channelId: tweet.user.id,
+          subscriberId: req.user.id
+        }
+      });
+      
+      tweetResponse.owner.isSubscribed = !!subscription;
+    } else {
+      // If no authenticated user, cache the response
+      await redisClient.set(
+        `${REDIS_KEYS.TWEET}${tweetId}`,
+        JSON.stringify(tweetResponse),
+        {EX: 3600}
+      );
+    }
     return res.status(200).json(new ApiResponse(200, tweetResponse, "Tweet fetched successfully"));
   } catch (error) {
     throw new ApiError(500, error?.message || "Failed to fetch tweet");
@@ -198,7 +236,7 @@ const getUserTweets = asyncHandler(async (req, res) => {
   }
   
   
-  await redisClient.set(`${REDIS_KEYS.USER_TWEETS}${userId}`, JSON.stringify(tweets));
+  await redisClient.set(`${REDIS_KEYS.USER_TWEETS}${userId}`, JSON.stringify(tweets),{EX: 3600});
   
   return res.status(200).json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
 });
@@ -263,7 +301,7 @@ const updateTweet = asyncHandler(async (req, res) => {
   });
   
   await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
-  await redisClient.set(`${REDIS_KEYS.TWEET}${tweetId}`, JSON.stringify(tweet));
+  await redisClient.set(`${REDIS_KEYS.TWEET}${tweetId}`, JSON.stringify(tweet),{EX: 3600});
   
   return res.status(200).json(
     new ApiResponse(200, updatedTweet, "Tweet updated successfully")
@@ -346,7 +384,7 @@ const getAllTweets = asyncHandler(async (req, res) => {
     }
   });
 
-  await redisClient.set(REDIS_KEYS.ALL_TWEETS, JSON.stringify(tweets));
+  await redisClient.set(REDIS_KEYS.ALL_TWEETS, JSON.stringify(tweets),{EX: 3600});
 
   return res
     .status(200)

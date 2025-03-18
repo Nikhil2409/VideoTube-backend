@@ -51,7 +51,8 @@ const getAllVideos = asyncHandler(async (req, res) => {
   // Store in Redis cache
   await redisClient.set(
     `${REDIS_KEYS.ALL_VIDEOS}`, 
-    JSON.stringify(videos)
+    JSON.stringify(videos),
+    {EX: 3600}
   );
   
   return res
@@ -296,7 +297,8 @@ const getVideoById = asyncHandler(async (req, res) => {
       // If no authenticated user, cache the response
       await redisClient.set(
         `${REDIS_KEYS.VIDEO}${videoId}`,
-        JSON.stringify(videoResponse)
+        JSON.stringify(videoResponse),
+        {EX: 3600}
       );
     }
 
@@ -570,7 +572,8 @@ const ownedById = asyncHandler(async (req, res) => {
     // Store in Redis cache
     await redisClient.set(
       `${REDIS_KEYS.USER_VIDEOS}${userId}`,
-      JSON.stringify(videos)
+      JSON.stringify(videos),
+      {EX: 3600}
     );
     
     return res.status(200).json({
@@ -643,7 +646,8 @@ const ownedByName = asyncHandler(async (req, res) => {
     // Store in Redis cache
     await redisClient.set(
       `${REDIS_KEYS.USER_VIDEOS_BY_USERNAME}${username}`,
-      JSON.stringify(videos)
+      JSON.stringify(videos),
+      {EX: 3600}
     );
     
     return res.status(200).json({

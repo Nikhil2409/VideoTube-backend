@@ -114,19 +114,38 @@ const getLikedTweets = asyncHandler(async (req, res) => {
         NOT: { tweetId: null }
       },
       include: {
-        tweet:{
-          select:{
-          id:true,
-          content:true,
-          image:true,
-          owner:true,
-          createdAt: true,
-          views:true,
+        tweet: {
+          select: {
+            id: true,
+            content: true,
+            image: true,
+            createdAt: true,
+            views: true,
+            owner: true,
+            user: {
+              select: {
+                id: true,
+                username: true,
+                fullName: true,
+                avatar: true,
+                email: true,
+                createdAt: true,
+              }
+            }
+          }
         }
       }
-      }
     });
-    const formattedTweets = likedTweets.map(like => like.tweet).filter(Boolean);
+    const formattedTweets = likedTweets
+    .filter(like => like.tweet)
+    .map(like => ({
+      id: like.tweet.id,
+      content: like.tweet.content,
+      image: like.tweet.image,
+      createdAt: like.tweet.createdAt,
+      views: like.tweet.views,
+      owner: like.tweet.user  // Map the user info to owner for consistency
+    }));
 
     await redisClient.set(cacheKey, JSON.stringify(formattedTweets), { EX: 1800 });
     
