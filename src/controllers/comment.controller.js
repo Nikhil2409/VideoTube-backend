@@ -8,6 +8,59 @@ import { REDIS_KEYS } from "../constants/redisKeys.js";
 const prisma = new PrismaClient();
 const CACHE_EXPIRATION = 60 * 60;
 
+// Helper function to invalidate comment-related caches
+const invalidateCommentCaches = async (commentId, videoId, tweetId, userId) => {
+  const cachesToDelete = [];
+  
+  // Specific comment cache
+  if (commentId) {
+    cachesToDelete.push(`${REDIS_KEYS.COMMENT}${commentId}`);
+    cachesToDelete.push(`${REDIS_KEYS.COMMENT_LIKES}${commentId}`);
+  }
+  
+  // Video-related caches
+  if (videoId) {
+    const videoCachePattern = `${REDIS_KEYS.VIDEO_COMMENTS}${videoId}_*`;
+    const videoKeys = await redisClient.keys(videoCachePattern);
+    cachesToDelete.push(...videoKeys);
+    
+    // Invalidate video likes (as comment counts may be displayed with videos)
+    cachesToDelete.push(`${REDIS_KEYS.VIDEO_LIKES}${videoId}`);
+    cachesToDelete.push(`${REDIS_KEYS.VIDEO}${videoId}`);
+  }
+  
+  // Tweet-related caches
+  if (tweetId) {
+    const tweetCachePattern = `${REDIS_KEYS.TWEET_COMMENTS}${tweetId}_*`;
+    const tweetKeys = await redisClient.keys(tweetCachePattern);
+    cachesToDelete.push(...tweetKeys);
+    
+    // Invalidate tweet likes (as comment counts may be displayed with tweets)
+    cachesToDelete.push(`${REDIS_KEYS.TWEET_LIKES}${tweetId}`);
+    cachesToDelete.push(`${REDIS_KEYS.TWEET}${tweetId}`);
+  }
+  
+  // User-related caches
+  if (userId) {
+    // User's comments
+    const userCommentsCachePattern = `${REDIS_KEYS.USER_COMMENTS}${userId}*`;
+    const userCommentsKeys = await redisClient.keys(userCommentsCachePattern);
+    cachesToDelete.push(...userCommentsKeys);
+    
+    // User's comment likes
+    cachesToDelete.push(`${REDIS_KEYS.USER_COMMENT_LIKES}${userId}`);
+    
+    // User's video and tweet listings (as they may show comment counts)
+    cachesToDelete.push(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
+    cachesToDelete.push(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+  }
+  
+  // Delete all gathered caches if any exist
+  if (cachesToDelete.length > 0) {
+    await redisClient.del(cachesToDelete);
+  }
+};
+
 // Get all comments for a video (with pagination)
 const getVideoComments = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
@@ -151,29 +204,20 @@ const addVideoComment = asyncHandler(async (req, res) => {
             id: true,
             username: true,
             fullName: true,
-            avatar: true,
-            likes: true
+            avatar: true
           }
         }
       }
     });
     
-    // Invalidate video comments cache
-    const cachePattern = `${REDIS_KEYS.VIDEO_COMMENTS}${videoId}_*`;
-    const keys = await redisClient.keys(cachePattern);
-    if (keys.length > 0) {
-      await redisClient.del(keys);
-    }
-
-    // Invalidate user comments cache
-    const userCommentsCacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}`;
-    await redisClient.del(userCommentsCacheKey);
+    // Invalidate all relevant caches
+    await invalidateCommentCaches(null, videoId, null, userId);
     
     res
       .status(201)
       .json(new ApiResponse(201, newComment, "Comment added successfully"));
   } catch (error) {
-    res.status(500).json(new ApiError(500, "Error adding comment"));
+    res.status(500).json(new ApiError(500, error?.message || "Error adding comment"));
   }
 });
 
@@ -203,7 +247,7 @@ const updateVideoComment = asyncHandler(async (req, res) => {
 
     const comment = await prisma.comment.update({
       where: { id: commentId },
-      data: { content: text },  // Changed field name to 'content' to match schema
+      data: { content: text },
       include: {
         user: {
           select: {
@@ -216,24 +260,14 @@ const updateVideoComment = asyncHandler(async (req, res) => {
       }
     });
 
-    // Invalidate related caches
-    // Comment cache
-    const commentCacheKey = `${REDIS_KEYS.COMMENT}${commentId}`;
-    await redisClient.del(commentCacheKey);
+    // Invalidate all relevant caches
+    await invalidateCommentCaches(
+      commentId, 
+      existingComment.videoId, 
+      existingComment.tweetId, 
+      userId
+    );
     
-    // Video comments cache if this is a video comment
-    if (existingComment.videoId) {
-      const videoCachePattern = `${REDIS_KEYS.VIDEO_COMMENTS}${existingComment.videoId}_*`;
-      const videoKeys = await redisClient.keys(videoCachePattern);
-      if (videoKeys.length > 0) {
-        await redisClient.del(videoKeys);
-      }
-    }
-    
-    // User comments cache
-    const userCommentsCacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}`;
-    await redisClient.del(userCommentsCacheKey);
-
     res
       .status(200)
       .json(new ApiResponse(200, comment, "Comment updated successfully"));
@@ -241,7 +275,7 @@ const updateVideoComment = asyncHandler(async (req, res) => {
     if (error.code === 'P2025') {
       return res.status(404).json(new ApiError(404, "Comment not found"));
     }
-    res.status(500).json(new ApiError(500, "Error updating comment"));
+    res.status(500).json(new ApiError(500, error?.message || "Error updating comment"));
   }
 });
 
@@ -264,31 +298,15 @@ const deleteVideoComment = asyncHandler(async (req, res) => {
       return res.status(403).json(new ApiError(403, "Not authorized to delete this comment"));
     }
 
-    // Store video/tweet ID before deleting the comment
+    // Store video ID before deleting the comment
     const videoId = existingComment.videoId;
 
     await prisma.comment.delete({
       where: { id: commentId },
     });
 
-    // Invalidate related caches
-    // Comment cache
-    const commentCacheKey = `${REDIS_KEYS.COMMENT}${commentId}`;
-    await redisClient.del(commentCacheKey);
-    
-    // Video comments cache if this was a video comment
-    if (videoId) {
-      const videoCachePattern = `${REDIS_KEYS.VIDEO_COMMENTS}${videoId}_*`;
-      const videoKeys = await redisClient.keys(videoCachePattern);
-      if (videoKeys.length > 0) {
-        await redisClient.del(videoKeys);
-      }
-    }
-    
-    
-    // User comments cache
-    const userCommentsCacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}`;
-    await redisClient.del(userCommentsCacheKey);
+    // Invalidate all relevant caches
+    await invalidateCommentCaches(commentId, videoId, null, userId);
 
     res
       .status(200)
@@ -297,7 +315,7 @@ const deleteVideoComment = asyncHandler(async (req, res) => {
     if (error.code === 'P2025') {
       return res.status(404).json(new ApiError(404, "Comment not found"));
     }
-    res.status(500).json(new ApiError(500, "Error deleting comment"));
+    res.status(500).json(new ApiError(500, error?.message || "Error deleting comment"));
   }
 });
 
@@ -318,10 +336,9 @@ const getAllUserVideoComments = asyncHandler(async (req, res) => {
     // Try to get data from cache first
     const cachedData = await redisClient.get(cacheKey);
     if (cachedData) {
-      return res.status(200).json({
-        success: true,
-        data: JSON.parse(cachedData)
-      });
+      return res.status(200).json(
+        new ApiResponse(200, JSON.parse(cachedData), "Comments fetched from cache")
+      );
     }
 
     // Find all comments made by the user with prisma
@@ -396,10 +413,9 @@ const getAllUserVideoComments = asyncHandler(async (req, res) => {
     });
 
     // Return the comments with success status
-    return res.status(200).json({
-      success: true,
-      data: responseData
-    });
+    return res.status(200).json(
+      new ApiResponse(200, responseData, "User video comments fetched successfully")
+    );
   } catch (error) {
     console.error("Error fetching user comments:", error);
     return res
@@ -498,16 +514,12 @@ const getTweetComments = asyncHandler(async (req, res) => {
     });
 
     // Create response data
-    const responseData = new ApiResponse(
-      200, 
-      {
-        comments: processedComments,
-        totalComments,
-        page: parseInt(page),
-        totalPages: Math.ceil(totalComments / parseInt(limit))
-      }, 
-      "Comments fetched successfully"
-    );
+    const responseData = {
+      comments: processedComments,
+      totalComments,
+      page: parseInt(page),
+      totalPages: Math.ceil(totalComments / parseInt(limit))
+    };
 
     // Cache the response
     await redisClient.set(cacheKey, JSON.stringify(responseData), {
@@ -516,8 +528,8 @@ const getTweetComments = asyncHandler(async (req, res) => {
 
     // Return the processed comments with pagination info
     return res
-    .status(200)
-    .json(new ApiResponse(200, responseData, "Comments fetched successfully"));
+      .status(200)
+      .json(new ApiResponse(200, responseData, "Comments fetched successfully"));
       
   } catch (error) {
     if (error.code === 'P2023') {
@@ -566,22 +578,14 @@ const addTweetComment = asyncHandler(async (req, res) => {
       }
     });
     
-    // Invalidate video comments cache
-    const cachePattern = `${REDIS_KEYS.TWEET_COMMENTS}${tweetId}_*`;
-    const keys = await redisClient.keys(cachePattern);
-    if (keys.length > 0) {
-      await redisClient.del(keys);
-    }
-
-    // Invalidate user comments cache
-    const userCommentsCacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}`;
-    await redisClient.del(userCommentsCacheKey);
+    // Invalidate all relevant caches
+    await invalidateCommentCaches(null, null, tweetId, userId);
     
     res
       .status(201)
       .json(new ApiResponse(201, newComment, "Comment added successfully"));
   } catch (error) {
-    res.status(500).json(new ApiError(500, "Error adding comment"));
+    res.status(500).json(new ApiError(500, error?.message || "Error adding comment"));
   }
 });
 
@@ -598,8 +602,7 @@ const updateTweetComment = asyncHandler(async (req, res) => {
   try {
     // First check if the comment exists and belongs to the user
     const existingComment = await prisma.comment.findUnique({
-      where: { id: commentId },
-      include: { tweet: { select: { id: true } } }
+      where: { id: commentId }
     });
 
     if (!existingComment) {
@@ -625,22 +628,13 @@ const updateTweetComment = asyncHandler(async (req, res) => {
       }
     });
 
-    // Invalidate related cache keys
-    const commentCacheKey = `${REDIS_KEYS.COMMENT}${commentId}`;
-    await redisClient.del(commentCacheKey);
-    
-    // Video comments cache if this is a video comment
-    if (existingComment.tweetId) {
-      const tweetCachePattern = `${REDIS_KEYS.TWEET_COMMENTS}${existingComment.tweetId}_*`;
-      const tweetKeys = await redisClient.keys(tweetCachePattern);
-      if (tweetKeys.length > 0) {
-        await redisClient.del(tweetKeys);
-      }
-    }
-    
-    // User comments cache
-    const userCommentsCacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}`;
-    await redisClient.del(userCommentsCacheKey);
+    // Invalidate all relevant caches
+    await invalidateCommentCaches(
+      commentId, 
+      existingComment.videoId, 
+      existingComment.tweetId, 
+      userId
+    );
 
     res
       .status(200)
@@ -649,7 +643,7 @@ const updateTweetComment = asyncHandler(async (req, res) => {
     if (error.code === 'P2025') {
       return res.status(404).json(new ApiError(404, "Comment not found"));
     }
-    res.status(500).json(new ApiError(500, "Error updating comment"));
+    res.status(500).json(new ApiError(500, error?.message || "Error updating comment"));
   }
 });
 
@@ -661,8 +655,7 @@ const deleteTweetComment = asyncHandler(async (req, res) => {
   try {
     // First check if the comment exists and belongs to the user
     const existingComment = await prisma.comment.findUnique({
-      where: { id: commentId },
-      include: { tweet: { select: { id: true } } }
+      where: { id: commentId }
     });
 
     if (!existingComment) {
@@ -673,34 +666,16 @@ const deleteTweetComment = asyncHandler(async (req, res) => {
       return res.status(403).json(new ApiError(403, "Not authorized to delete this comment"));
     }
 
+    // Store the tweet ID before deleting
+    const tweetId = existingComment.tweetId;
+
+    // Delete the specific comment
     await prisma.comment.delete({
       where: { id: commentId },
     });
 
-    // Invalidate related cache keys
-    const tweetId = existingComment.tweetId;
-    await prisma.comment.delete({
-      where: { tweetId: tweetId },
-    });
-
-    // Invalidate related caches
-    // Comment cache
-    const commentCacheKey = `${REDIS_KEYS.COMMENT}${commentId}`;
-    await redisClient.del(commentCacheKey);
-    
-    // Video comments cache if this was a video comment
-    if (tweetId) {
-      const tweetcachePattern = `${REDIS_KEYS.TWEET_COMMENTS}${tweetId}_*`;
-      const tweetkeys = await redisClient.keys(tweetcachePattern);
-      if (tweetkeys.length > 0) {
-        await redisClient.del(tweetkeys);
-      }
-    }
-    
-    
-    // User comments cache
-    const userCommentsCacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}`;
-    await redisClient.del(userCommentsCacheKey);
+    // Invalidate all relevant caches
+    await invalidateCommentCaches(commentId, null, tweetId, userId);
 
     res
       .status(200)
@@ -709,7 +684,7 @@ const deleteTweetComment = asyncHandler(async (req, res) => {
     if (error.code === 'P2025') {
       return res.status(404).json(new ApiError(404, "Comment not found"));
     }
-    res.status(500).json(new ApiError(500, "Error deleting comment"));
+    res.status(500).json(new ApiError(500, error?.message || "Error deleting comment"));
   }
 });
 
@@ -725,7 +700,7 @@ const getAllUserTweetComments = asyncHandler(async (req, res) => {
   }
 
   // Create cache key for user comments
-  const cacheKey = `user:${userId}:comments`;
+  const cacheKey = `${REDIS_KEYS.USER_COMMENTS}${userId}_tweets`;
 
   try {
     // Try to get data from cache first
@@ -785,26 +760,25 @@ const getAllUserTweetComments = asyncHandler(async (req, res) => {
     // Count the total number of comments
     const totalComments = await prisma.comment.count({
       where: {
-        userId: userId
+        userId: userId,
+        tweetId: { not: null }
       }
     });
 
     // Create response data
-    const responseData = new ApiResponse(
-      200,
-      {
-        comments,
-        totalComments
-      },
-      "User comments fetched successfully"
-    );
+    const responseData = {
+      comments,
+      totalComments
+    };
 
     // Cache the response
     await redisClient.set(cacheKey, JSON.stringify(responseData), {
       EX: CACHE_EXPIRATION
     });
 
-    res.status(200).json(responseData);
+    res.status(200).json(
+      new ApiResponse(200, responseData, "User tweet comments fetched successfully")
+    );
   } catch (error) {
     console.error("Error fetching user comments:", error);
     res.status(500).json(new ApiError(500, "Failed to fetch user comments"));
@@ -822,4 +796,4 @@ export {
   updateTweetComment,
   deleteTweetComment,
   getAllUserTweetComments
-}
+};

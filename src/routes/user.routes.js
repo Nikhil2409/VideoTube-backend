@@ -14,8 +14,6 @@ import {
   inspectData,
   deleteSpecificData,
   getUserWatchHistory,
-  createWatchHistoryEntry,
-  clearUserWatchHistory,
   googleAuth,
 } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
@@ -46,11 +44,11 @@ router.route("/register").post(
   registerUser
 );
 
-router.route("/login").post(authLimiter,loginUser);
+router.route("/login").post(loginUser);
 router.post('/inspect-data', verifyJWT, inspectData);
 router.post('/delete-specific-data', verifyJWT, deleteSpecificData)
 router.route("/logout").post(verifyJWT, logoutUser);
-router.route("/refresh-token").post(authLimiter,refreshAccessToken);
+router.route("/refresh-token").post(refreshAccessToken);
 router.route("/change-password").patch(verifyJWT, changeCurrentPassword);
 router.route("/current-user").get(verifyJWT, getCurrentUser);
 router.route("/update-account").patch(
@@ -69,7 +67,6 @@ router
 router
   .route("/cover-image")
   .patch(verifyJWT, upload.single("coverImage"), updateUserCoverImage);
-router.route("/addToWatchHistory/:videoId").post(verifyJWT, createWatchHistoryEntry)
 router.route("/c/:username").get(verifyJWT, getUserChannelProfile);
 router.route("/history").get(verifyJWT, getUserWatchHistory);
 

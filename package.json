@@ -7,7 +7,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "worker": "node src/workers/subscriptionWorker.js"
   },
   "keywords": [
     "nodejs",
@@ -23,7 +24,9 @@
     "prisma": "^6.4.1"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.758.0",
     "@prisma/client": "^6.4.1",
+    "amqplib": "^0.10.5",
     "axios": "^1.8.2",
     "bcrypt": "^5.1.1",
     "cloudinary": "^2.5.1",

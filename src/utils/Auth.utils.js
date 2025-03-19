@@ -1,5 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import dotenv from "dotenv"
+
+dotenv.config();
+
 
 const prisma = new PrismaClient();
 
@@ -13,7 +17,7 @@ class UserTokenService {
   generateAccessToken(user, provider = 'local') {
     return jwt.sign(
       {
-        _id: user.id,
+        id: user.id,
         email: user.email,
         username: user.username || this.generateUsernameFromEmail(user.email),
         fullName: user.fullName || user.displayName || user.name || user.email.split('@')[0],
@@ -39,7 +43,7 @@ class UserTokenService {
   generateRefreshToken(user, provider = 'local') {
     return jwt.sign(
       {
-        _id: user.id,
+        id: user.id,
         provider: provider,
       },
       process.env.REFRESH_TOKEN_SECRET || "fallback-refresh-secret-key",

@@ -5,6 +5,7 @@ import { createServer } from "http"
 import { Server } from "socket.io"
 import cron from "node-cron"
 import { flushVideoViewCountsToDB, flushTweetViewCountsToDB } from "./utils/dbUpdates.js"
+import { SQSClient, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
 
 // Initialize Express app
 const app = express()
@@ -59,6 +60,22 @@ app.use("/api/v1/comments", commentRouter)
 app.use("/api/v1/likes", likeRouter)
 app.use("/api/v1/playlist", playlistRouter)
 app.use("/api/v1/dashboard", dashboardRouter)
+app.get('/api/v1/queue-status', async (req, res) => {
+  try {
+    const { Attributes } = await sqsClient.send(new GetQueueAttributesCommand({
+      QueueUrl: QUEUE_URL,
+      AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+    }));
+    
+    res.json({
+      messagesAvailable: parseInt(Attributes.ApproximateNumberOfMessages),
+      messagesInFlight: parseInt(Attributes.ApproximateNumberOfMessagesNotVisible),
+      queueUrl: QUEUE_URL.split('/').pop() // Just the queue name for security
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Keep track of online users
 const onlineUsers = new Map(); // userId -> {username, socketId}

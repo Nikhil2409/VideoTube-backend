@@ -3,14 +3,14 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
-import  redisClient  from "../config/redis.js";
+import redisClient from "../config/redis.js";
 import { REDIS_KEYS } from "../constants/redisKeys.js";
 
 const prisma = new PrismaClient();
 
 const incrementViewCount = asyncHandler(async(req, res) => {
   const { tweetId } = req.params;
-  const userId = req.user.id;
+  const userId = req.user?.id;
   
   try {
     // Use Redis for atomic increment
@@ -34,11 +34,15 @@ const incrementViewCount = asyncHandler(async(req, res) => {
       views: tweet.views + currentViews - 1 // Adjust for accurate display
     };
     
-    // Invalidate relevant caches
+    // Invalidate tweet cache
     await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
-    await redisClient.del(`${REDIS_KEYS.ALL_TWEETS}`);
-    await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${userId}`);
-    await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+    
+    // Instead of invalidating all caches, only invalidate specific ones
+    if (userId) {
+      // Only invalidate user-specific caches if we have a userId
+      await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${userId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${tweet.owner}`);
+    }
     
     return res
       .status(200)
@@ -82,8 +86,10 @@ const createTweet = asyncHandler(async (req, res) => {
     data: tweetData
   });
   
+  // Invalidate relevant caches
   await redisClient.del(REDIS_KEYS.ALL_TWEETS);
   await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+  
   return res.status(201).json(
     new ApiResponse(201, tweet, "Tweet created successfully")
   );
@@ -91,13 +97,48 @@ const createTweet = asyncHandler(async (req, res) => {
 
 const getTweetById = asyncHandler(async (req, res) => {
   const { tweetId } = req.params;
+  const userId = req.user?.id;
   
   if (!tweetId) {
     throw new ApiError(400, "Tweet ID is required");
   }
 
+  // Try to get from cache first
   const cachedTweet = await redisClient.get(`${REDIS_KEYS.TWEET}${tweetId}`);
-  if (cachedTweet) {
+  
+  // If user is authenticated, also check for tweet likes
+  let userLikeStatus = false;
+  let userSubscriptionStatus = false;
+  
+  if (userId && cachedTweet) {
+    // Get additional user-specific data from Redis
+    const cachedLikes = await redisClient.get(`${REDIS_KEYS.TWEET_LIKES}${tweetId}`);
+    if (cachedLikes) {
+      const likes = JSON.parse(cachedLikes);
+      userLikeStatus = likes.some(like => like.userId === userId);
+    }
+    
+    // Get the parsed tweet for owner ID
+    const parsedTweet = JSON.parse(cachedTweet);
+    const ownerId = parsedTweet.owner?.id;
+    
+    if (ownerId) {
+      const cachedSubStatus = await redisClient.get(`${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${userId}_${ownerId}`);
+      userSubscriptionStatus = cachedSubStatus === "true";
+    }
+    
+    // Return the cached tweet with user-specific data
+    const tweetWithUserData = {
+      ...JSON.parse(cachedTweet),
+      isLiked: userLikeStatus,
+      owner: {
+        ...JSON.parse(cachedTweet).owner,
+        isSubscribed: userSubscriptionStatus
+      }
+    };
+    
+    return res.status(200).json(new ApiResponse(200, tweetWithUserData, "Tweet fetched with user data"));
+  } else if (cachedTweet) {
     return res.status(200).json(new ApiResponse(200, JSON.parse(cachedTweet), "Tweet fetched from cache"));
   }
 
@@ -154,6 +195,7 @@ const getTweetById = asyncHandler(async (req, res) => {
     if (!tweet) {
       throw new ApiError(404, "Tweet not found");
     }
+    
     const ownerData = {
       id: tweet.user.id,
       username: tweet.user.username,
@@ -169,34 +211,58 @@ const getTweetById = asyncHandler(async (req, res) => {
       likes: tweet.likes,
       likesCount: tweet.likes.length,
       commentsCount: tweet.comments.length,
-      isLiked: req.user ? tweet.likes.some(like => like.user.id === req.user.id) : false,
+      isLiked: false,
       owner: ownerData,
       createdAt: tweet.createdAt
     };
 
     delete tweetResponse.user;
 
-    if (req.user) {
-      const likeExists = tweet.likes.some(like => like.user.id === req.user.id);
+    // Cache tweet comments and likes separately for more granular updates
+    await redisClient.set(
+      `${REDIS_KEYS.TWEET_COMMENTS}${tweetId}`, 
+      JSON.stringify(tweet.comments),
+      {EX: 3600}
+    );
+    
+    await redisClient.set(
+      `${REDIS_KEYS.TWEET_LIKES}${tweetId}`, 
+      JSON.stringify(tweet.likes.map(like => ({
+        userId: like.user.id,
+        username: like.user.username
+      }))),
+      {EX: 3600}
+    );
+
+    if (userId) {
+      const likeExists = tweet.likes.some(like => like.user.id === userId);
       tweetResponse.isLiked = likeExists;
 
-      // Check if user is subscribed to the video owner
+      // Check if user is subscribed to the tweet owner
       const subscription = await prisma.subscription.findFirst({
         where: {
           userId: tweet.user.id,
-          subscriberId: req.user.id
+          subscriberId: userId
         }
       });
       
       tweetResponse.owner.isSubscribed = !!subscription;
-    } else {
-      // If no authenticated user, cache the response
+      
+      // Cache the subscription status
       await redisClient.set(
-        `${REDIS_KEYS.TWEET}${tweetId}`,
-        JSON.stringify(tweetResponse),
+        `${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${userId}_${tweet.user.id}`,
+        String(!!subscription),
         {EX: 3600}
       );
     }
+    
+    // Cache the tweet response
+    await redisClient.set(
+      `${REDIS_KEYS.TWEET}${tweetId}`,
+      JSON.stringify(tweetResponse),
+      {EX: 3600}
+    );
+    
     return res.status(200).json(new ApiResponse(200, tweetResponse, "Tweet fetched successfully"));
   } catch (error) {
     throw new ApiError(500, error?.message || "Failed to fetch tweet");
@@ -209,16 +275,17 @@ const getUserTweets = asyncHandler(async (req, res) => {
   if (!userId?.trim()) {
     return res.status(400).json({ success: false, message: "User ID is required" });
   }
-  console.log(userId);
+  
+  // Get tweets from cache
   const cachedTweets = await redisClient.get(`${REDIS_KEYS.USER_TWEETS}${userId}`);
-  console.log(cachedTweets);
+  
   if (cachedTweets) {
     return res.status(200).json(new ApiResponse(200, JSON.parse(cachedTweets), "Tweets fetched from cache"));
   }
   
   const tweets = await prisma.tweet.findMany({
     where: {
-      owner : userId
+      owner: userId
     },
     include: {
       user: {
@@ -229,6 +296,16 @@ const getUserTweets = asyncHandler(async (req, res) => {
           avatar: true
         }
       },
+      likes: {
+        select: {
+          id: true
+        }
+      },
+      comments: {
+        select: {
+          id: true
+        }
+      }
     },
     orderBy: {
       createdAt: 'desc'
@@ -236,17 +313,31 @@ const getUserTweets = asyncHandler(async (req, res) => {
   });
   
   if (tweets.length === 0) {
-    return res.status(200).json({
-      success: true,
-      message: "No tweets found for this user",
-      tweets: []
-    });
+    return res.status(200).json(new ApiResponse(200, [], "No tweets found for this user"));
   }
   
+  // Transform tweets to include counts
+  const tweetsWithCounts = tweets.map(tweet => ({
+    ...tweet,
+    likesCount: tweet.likes.length,
+    commentsCount: tweet.comments.length,
+    // Keep likes and comments arrays if needed or remove them
+    owner: tweet.user,
+  }));
   
-  await redisClient.set(`${REDIS_KEYS.USER_TWEETS}${userId}`, JSON.stringify(tweets),{EX: 3600});
+  // Remove the user property as we've mapped it to owner
+  tweetsWithCounts.forEach(tweet => {
+    delete tweet.user;
+  });
   
-  return res.status(200).json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
+  // Cache the transformed tweets
+  await redisClient.set(
+    `${REDIS_KEYS.USER_TWEETS}${userId}`, 
+    JSON.stringify(tweetsWithCounts),
+    {EX: 3600}
+  );
+  
+  return res.status(200).json(new ApiResponse(200, tweetsWithCounts, "Tweets fetched successfully"));
 });
 
 const updateTweet = asyncHandler(async (req, res) => {
@@ -308,8 +399,10 @@ const updateTweet = asyncHandler(async (req, res) => {
     data: updateData
   });
   
+  // Invalidate caches
   await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
-  await redisClient.set(`${REDIS_KEYS.TWEET}${tweetId}`, JSON.stringify(tweet),{EX: 3600});
+  await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+  await redisClient.del(REDIS_KEYS.ALL_TWEETS);
   
   return res.status(200).json(
     new ApiResponse(200, updatedTweet, "Tweet updated successfully")
@@ -339,12 +432,6 @@ const deleteTweet = asyncHandler(async (req, res) => {
     throw new ApiError(403, "You don't have permission to delete this tweet");
   }
   
-  await prisma.tweet.delete({ where: { id: tweetId } });
-  await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
-  await redisClient.del(REDIS_KEYS.ALL_TWEETS);
-  await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
-  await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${tweetId}`);
-
   try {
     // Delete associated records first to maintain referential integrity
     
@@ -369,6 +456,13 @@ const deleteTweet = asyncHandler(async (req, res) => {
       }
     });
     
+    // Invalidate all related caches
+    await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
+    await redisClient.del(`${REDIS_KEYS.TWEET_COMMENTS}${tweetId}`);
+    await redisClient.del(`${REDIS_KEYS.TWEET_LIKES}${tweetId}`);
+    await redisClient.del(`${REDIS_KEYS.USER_TWEETS}${userId}`);
+    await redisClient.del(REDIS_KEYS.ALL_TWEETS);
+    
     return res.status(200).json(
       new ApiResponse(200, {}, "Tweet deleted successfully")
     );
@@ -381,22 +475,157 @@ const deleteTweet = asyncHandler(async (req, res) => {
 });
 
 const getAllTweets = asyncHandler(async (req, res) => {
-  const cachedTweets = await redisClient.get(REDIS_KEYS.ALL_TWEETS);
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  const cacheKey = `${REDIS_KEYS.ALL_TWEETS}_${page}_${limit}`;
+  
+  // Try to get from cache first
+  const cachedTweets = await redisClient.get(cacheKey);
   if (cachedTweets) {
     return res.status(200).json(new ApiResponse(200, JSON.parse(cachedTweets), "Tweets fetched from cache"));
   }
 
-  const tweets = await prisma.tweet.findMany({
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+  
+  const [tweets, totalCount] = await Promise.all([
+    prisma.tweet.findMany({
+      skip,
+      take: limit,
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true
+          }
+        },
+        likes: {
+          select: {
+            id: true
+          }
+        },
+        comments: {
+          select: {
+            id: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    }),
+    prisma.tweet.count()
+  ]);
+  
+  // Transform tweets to include counts and proper structure
+  const formattedTweets = tweets.map(tweet => ({
+    ...tweet,
+    likesCount: tweet.likes.length,
+    commentsCount: tweet.comments.length,
+    owner: tweet.user
+  }));
+  
+  // Remove user property as we've mapped it to owner
+  formattedTweets.forEach(tweet => {
+    delete tweet.user;
+  });
+  
+  const response = {
+    tweets: formattedTweets,
+    pagination: {
+      total: totalCount,
+      page,
+      limit,
+      pages: Math.ceil(totalCount / limit)
+    }
+  };
+
+  // Cache the response
+  await redisClient.set(cacheKey, JSON.stringify(response), {EX: 3600});
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, response, "Tweets fetched successfully"));
+});
+
+// New method to get tweets liked by a user
+const getUserLikedTweets = asyncHandler(async (req, res) => {
+  const userId = req.params.userId || req.user.id;
+  
+  // Try to get from cache first
+  const cacheKey = `${REDIS_KEYS.USER_TWEET_LIKES}${userId}`;
+  const cachedLikes = await redisClient.get(cacheKey);
+  
+  if (cachedLikes) {
+    return res.status(200).json(new ApiResponse(200, JSON.parse(cachedLikes), "Liked tweets fetched from cache"));
+  }
+  
+  // Get tweets liked by the user
+  const likedTweets = await prisma.like.findMany({
+    where: {
+      userId: userId,
+      tweetId: { not: null } // Ensure we're only getting tweet likes
+    },
+    include: {
+      tweet: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              fullName: true,
+              avatar: true
+            }
+          },
+          likes: {
+            select: {
+              id: true
+            }
+          },
+          comments: {
+            select: {
+              id: true
+            }
+          }
+        }
+      }
+    },
     orderBy: {
       createdAt: 'desc'
     }
   });
-
-  await redisClient.set(REDIS_KEYS.ALL_TWEETS, JSON.stringify(tweets),{EX: 3600});
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, tweets, "Tweets fetched successfully"));
+  
+  // Format the response
+  const formattedTweets = likedTweets
+    .filter(like => like.tweet) // Filter out any null tweets (deleted tweets)
+    .map(like => ({
+      ...like.tweet,
+      likesCount: like.tweet.likes.length,
+      commentsCount: like.tweet.comments.length,
+      isLiked: true,
+      owner: like.tweet.user
+    }));
+  
+  // Remove user property as we've mapped it to owner
+  formattedTweets.forEach(tweet => {
+    delete tweet.user;
+  });
+  
+  // Cache the response
+  await redisClient.set(cacheKey, JSON.stringify(formattedTweets), {EX: 3600});
+  
+  return res.status(200).json(new ApiResponse(200, formattedTweets, "Liked tweets fetched successfully"));
 });
 
-export { incrementViewCount, createTweet, getTweetById, getUserTweets, updateTweet, deleteTweet, getAllTweets };
+export { 
+  incrementViewCount, 
+  createTweet, 
+  getTweetById, 
+  getUserTweets, 
+  updateTweet, 
+  deleteTweet, 
+  getAllTweets,
+  getUserLikedTweets 
+};

@@ -4,8 +4,31 @@ import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import redisClient from "../config/redis.js";
 import { REDIS_KEYS } from "../constants/redisKeys.js";
+import dotenv from "dotenv"
+import amqp from "amqplib";
+
+dotenv.config();
 
 const prisma = new PrismaClient();
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
+const QUEUE_NAME = process.env.QUEUE_NAME || "subscription_queue";
+
+// Create a connection pool or singleton
+let rabbitConnection = null;
+let rabbitChannel = null;
+
+async function getChannel() {
+  if (!rabbitChannel || !rabbitConnection) {
+    rabbitConnection = await amqp.connect(RABBITMQ_URL);
+    rabbitChannel = await rabbitConnection.createChannel();
+    
+    // Make sure the queue exists
+    await rabbitChannel.assertQueue(QUEUE_NAME, {
+      durable: true // Queue survives broker restart
+    });
+  }
+  return rabbitChannel;
+}
 
 const toggleSubscription = asyncHandler(async (req, res) => {
   const { userId } = req.params;
@@ -16,20 +39,20 @@ const toggleSubscription = asyncHandler(async (req, res) => {
   }
 
   try {
-    // Check if channel exists
+    // Check if channel exists (keep this validation)
     const user = await prisma.user.findUnique({
       where: { id: userId }
-  });
+    });
 
-  if (!user) {
-    throw new ApiError(404, "user not found");
-  }
+    if (!user) {
+      throw new ApiError(404, "user not found");
+    }
 
     if (userId === subscriberId) {
       throw new ApiError(400, "You cannot subscribe to your own channel");
     }
     
-    // Check if already subscribed
+    // Check if already subscribed (keep this to determine action type)
     const existingSubscription = await prisma.subscription.findUnique({
       where: {
         subscriberId_userId: {
@@ -39,74 +62,45 @@ const toggleSubscription = asyncHandler(async (req, res) => {
       }
     });
     
-    let result;
+    // Instead of processing directly, send to RabbitMQ
+    const subscriptionAction = existingSubscription ? 'UNSUBSCRIBE' : 'SUBSCRIBE';
+    console.log(`Subscription action queued: ${subscriptionAction} for userId: ${userId} by subscriberId: ${subscriberId}`);
     
-    if (existingSubscription) {
-      // Unsubscribe
-      await prisma.subscription.delete({
-        where: {
-          id: existingSubscription.id
-        }
-      });
-      
-      result = { subscribed: false, success: true };
-      
-      // Clear ALL related caches
-      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
-      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`);
-      await redisClient.del(`${REDIS_KEYS.USER}${user.username}`);
-      
-      // Clear paginated caches too (pattern deletion)
-      const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
-      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_p*`);
-      
-      if (subscriptionKeys.length > 0) {
-        await redisClient.del(subscriptionKeys);
-      }
-      if (subscriberKeys.length > 0) {
-        await redisClient.del(subscriberKeys);
-      }
-      
-      return res.status(200).json(
-        new ApiResponse(200, result, "Unsubscribed successfully")
-      );
-    } else {
-      // Subscribe
-      const subscription = await prisma.subscription.create({
-        data: {
-          subscriberId: subscriberId,
-          userId: userId
-        }
-      });
-      
-      result = { subscribed: true, success: true };
+    const channel = await getChannel();
     
-      // Clear ALL related caches
-      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
-      await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`);
-      await redisClient.del(`${REDIS_KEYS.USER}${user.username}`);
-
-      // Clear paginated caches too (pattern deletion)
-    const subscriptionKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_p*`);
-      const subscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_p*`);
-
-    if (subscriptionKeys.length > 0) {
-      await redisClient.del(subscriptionKeys);
-    }
-    if (subscriberKeys.length > 0) {
-      await redisClient.del(subscriberKeys);
-    }
-
-      return res.status(200).json(
-        new ApiResponse(200, result, "Subscribed successfully")
-      );
-    }
+    // Publish message to RabbitMQ
+    await channel.sendToQueue(
+      QUEUE_NAME, 
+      Buffer.from(JSON.stringify({
+        action: subscriptionAction,
+        userId,
+        subscriberId,
+        username: user.username,
+        timestamp: new Date().toISOString()
+      })),
+      { 
+        persistent: true // Message survives broker restart
+      }
+    );
+    
+    // Respond immediately with the expected new state
+    const result = { 
+      subscribed: subscriptionAction === 'SUBSCRIBE', 
+      success: true 
+    };
+    
+    return res.status(200).json(
+      new ApiResponse(
+        200, 
+        result, 
+        subscriptionAction === 'SUBSCRIBE' ? "Subscription queued" : "Unsubscription queued"
+      )
+    );
   } catch (error) {
     console.error("Subscription error:", error);
     throw new ApiError(500, `Subscription operation failed: ${error.message}`);
   }
 });
-
 
 const getUserChannelSubscribers = asyncHandler(async (req, res) => {
   const { userId } = req.params;

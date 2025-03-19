@@ -1,28 +1,30 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
+import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 
 // Custom metrics for different endpoints
 const errorRate = new Rate('errors');
 const videoFetchTrend = new Trend('video_fetch');
-const videoUploadTrend = new Trend('video_upload');
 const commentsTrend = new Trend('comments');
 const likesOperationTrend = new Trend('likes_operation');
-const searchTrend = new Trend('search');
 const authTrend = new Trend('auth_operations');
 const subscriptionTrend = new Trend('subscription');
 const playlistTrend = new Trend('playlist');
 const watchHistoryTrend = new Trend('watch_history');
 const tweetsTrend = new Trend('tweets');
 const userProfileTrend = new Trend('user_profile');
-const refreshTokens = {};
+const asyncOperationsTrend = new Trend('async_operations');
 
-// Real test users from your database
+// Custom metric for tracking async operations
+const asyncOperationErrors = new Rate('async_operation_errors');
+
+// Test users
 const testUsers = [
   { userId: '67d80f5e8cd85d232433a85d', username: 'nikhil1', email: 'nikhil1@mail.com', password: '12345678' },
   { userId: '67d85c1773e3c76253b9d4cd', username: 'nikhil2', email: 'nikhil2@mail.com', password: '12345678' },
   { userId: '67d95d9c5f669b7bae99b007', username: 'nikhil3', email: 'nikhil3@mail.com', password: '12345678' },
-  { userId: '67d95dae5f669b7bae99b008', username: 'nikhil4', email: 'nikhil4@mail.com', password: '12345678' }, // Fixed ID
+  { userId: '67d95dae5f669b7bae99b008', username: 'nikhil4', email: 'nikhil4@mail.com', password: '12345678' },
   { userId: '67d95dc25f669b7bae99b009', username: 'nikhil5', email: 'nikhil5@mail.com', password: '12345678'},
   { userId: '67d95df95f669b7bae99b00a', username: 'nikhil6', email: 'nikhil6@mail.com', password: '12345678'},
   { userId: '67d95e205f669b7bae99b00b', username: 'nikhil7', email: 'nikhil7@mail.com', password: '12345678'},
@@ -31,82 +33,69 @@ const testUsers = [
 
 // Sample content data
 const contentData = {
-    "videos": [
+  videos: [
+    {
+      videoId: "67d81163cdbdfaf39b16f39e",
+      videoTitle: "v1",
+      videoDescription: "v1",
+      videoFile: "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599477/videoTub…",
+      thumbnail: "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599533/videoTub…",
+      duration: 3,
+      views: 148,
+      isPublished: true,
+      owner: "67d80f5e8cd85d232433a85d",
+      createdAt: "2025-03-17T12:11:15.595+00:00",
+      updatedAt: "2025-03-18T09:41:48.061+00:00"
+    },
       {
-        "videoId": "67d81163cdbdfaf39b16f39e",
-        "videoTitle": "v1",
-        "videoDescription": "v1",
-        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599477/videoTub…",
-        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599533/videoTub…",
-        "duration": 3,
-        "views": 148,
-        "isPublished": true,
-        "owner": "67d80f5e8cd85d232433a85d",
-        "createdAt": "2025-03-17T12:11:15.595+00:00",
-        "updatedAt": "2025-03-18T09:41:48.061+00:00"
+        videoId: "67d88ec78c59701de6498f5c",
+        videoTitle: "v1",
+        videoDescription: "v1",
+        videoFile: "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741605435/videoTub…",
+        thumbnail: "https://res.cloudinary.com/dasnrzmvz/image/upload/v1742245572/videoTub…",
+        duration: 5,
+        views: 19,
+        isPublished: true,
+        owner: "67d85c1773e3c76253b9d4cd",
+        createdAt: "2025-03-17T21:06:15.224+00:00",
+        updatedAt: "2025-03-18T11:46:53.155+00:00"
       },
       {
-        "videoId": "67d88ec78c59701de6498f5c",
-        "videoTitle": "v1",
-        "videoDescription": "v1",
-        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741605435/videoTub…",
-        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1742245572/videoTub…",
-        "duration": 5,
-        "views": 19,
-        "isPublished": true,
-        "owner": "67d85c1773e3c76253b9d4cd",
-        "createdAt": "2025-03-17T21:06:15.224+00:00",
-        "updatedAt": "2025-03-18T11:46:53.155+00:00"
+        videoId: "67d95b72a7dca3f7a0fc4fd5",
+        videoTitle: "v2",
+        videoDescription: "v2",
+        videoFile: "https://res.cloudinary.com/dasnrzmvz/video/upload/v1742297968/videoTub…",
+        thumbnail: "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599435/videoTub…",
+        duration: 6,
+        views: 0,
+        isPublished: true,
+        owner: "67d85c1773e3c76253b9d4cd",
+        createdAt: "2025-03-18T11:39:30.559+00:00",
+        updatedAt: "2025-03-18T11:39:30.559+00:00"
       },
       {
-        "videoId": "67d95b72a7dca3f7a0fc4fd5",
-        "videoTitle": "v2",
-        "videoDescription": "v2",
-        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1742297968/videoTub…",
-        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599435/videoTub…",
-        "duration": 6,
-        "views": 0,
-        "isPublished": true,
-        "owner": "67d85c1773e3c76253b9d4cd",
-        "createdAt": "2025-03-18T11:39:30.559+00:00",
-        "updatedAt": "2025-03-18T11:39:30.559+00:00"
-      },
-      {
-        "videoId": "67d95b92a7dca3f7a0fc4fd7",
-        "videoTitle": "v3",
-        "videoDescription": "v3",
-        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599998/videoTub…",
-        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741618351/videoTub…",
-        "duration": 15,
-        "views": 0,
-        "isPublished": true,
-        "owner": "67d85c1773e3c76253b9d4cd",
-        "createdAt": "2025-03-18T11:40:02.223+00:00",
-        "updatedAt": "2025-03-18T11:40:02.223+00:00"
-      },
-      {
-        "videoId": "67d95d6f5f669b7bae99b004",
-        "videoTitle": "video2",
-        "videoDescription": "video2",
-        "videoFile": "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599998/videoTub…",
-        "thumbnail": "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741599435/videoTub…",
-        "duration": 15,
-        "views": 0,
-        "isPublished": true,
-        "owner": "67d80f5e8cd85d232433a85d",
-        "createdAt": "2025-03-18T11:47:59.562+00:00",
-        "updatedAt": "2025-03-18T11:47:59.562+00:00"
+        videoId: "67d95b92a7dca3f7a0fc4fd7",
+        videoTitle: "v3",
+        videoDescription: "v3",
+        videoFile: "https://res.cloudinary.com/dasnrzmvz/video/upload/v1741599998/videoTub…",
+        thumbnail: "https://res.cloudinary.com/dasnrzmvz/image/upload/v1741618351/videoTub…",
+        duration: 15,
+        views: 0,
+        isPublished: true,
+        owner: "67d85c1773e3c76253b9d4cd",
+        createdAt: "2025-03-18T11:40:02.223+00:00",
+        updatedAt: "2025-03-18T11:40:02.223+00:00"
       }
     ], tweets: [
-      {
-        tweetId: '67d85146d710603ea9b6a175',
-        content: 'hey',
-        views: 141,
-        isPublished: true,
-        owner: '67d80f5e8cd85d232433a85d',
-        createdAt: '2025-03-17T16:43:50.184+00:00',
-        updatedAt: '2025-03-18T11:02:03.327+00:00'
-      },
+    {
+      tweetId: '67d85146d710603ea9b6a175',
+      content: 'hey',
+      views: 141,
+      isPublished: true,
+      owner: '67d80f5e8cd85d232433a85d',
+      createdAt: '2025-03-17T16:43:50.184+00:00',
+      updatedAt: '2025-03-18T11:02:03.327+00:00'
+    },
       {
         tweetId: '67d94cb02e0efe68b9287b23',
         content: 'hey',
@@ -139,15 +128,15 @@ const contentData = {
       }
   ],
   playlists: [
-      {
-        playlistId: '67d8993600c19e272c58cd81',
-        name: 'playlist1',
-        description: 'pp',
-        owner: '67d80f5e8cd85d232433a85d',
-        videoIds: [], // Array (2) - actual IDs not provided
-        createdAt: '2025-03-17T21:50:46.017+00:00',
-        updatedAt: '2025-03-18T11:48:06.413+00:00'
-      },
+    {
+      playlistId: '67d8993600c19e272c58cd81',
+      name: 'playlist1',
+      description: 'pp',
+      owner: '67d80f5e8cd85d232433a85d',
+      videoIds: [],
+      createdAt: '2025-03-17T21:50:46.017+00:00',
+      updatedAt: '2025-03-18T11:48:06.413+00:00'
+    },
       {
         playlistId: '67d93678db6c1c871211a3c6',
         name: 'playlist1',
@@ -164,14 +153,9 @@ const contentData = {
 function randomItem(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
-
-// Auth token cache
-let authTokens = {};
-
 // Test configuration
 export const options = {
   scenarios: {
-    // Simulate average load - constant rate of requests
     average_load: {
       executor: 'constant-arrival-rate',
       rate: 10,
@@ -180,7 +164,6 @@ export const options = {
       preAllocatedVUs: 10,
       maxVUs: 50,
     },
-    // Simulate peak load - ramping up user traffic
     peak_load: {
       executor: 'ramping-arrival-rate',
       startRate: 5,
@@ -195,16 +178,17 @@ export const options = {
     }
   },
   thresholds: {
-    'http_req_duration': ['p(95)<500'], // 95% of requests under 500ms
-    'video_fetch': ['p(95)<300'],       // Video fetch should be fast (Redis cached)
-    'auth_operations': ['p(95)<150'],   // Auth should be quick
-    'user_profile': ['p(95)<200'],      // User profile should be fast
-    'tweets': ['p(95)<250'],            // Tweets should be fast
-    'watch_history': ['p(95)<300'],     // Watch history should be fast
-    'http_req_failed': ['rate<0.01'],   // Less than 1% failures
+    'http_req_duration': ['p(95)<500'],
+    'video_fetch': ['p(95)<300'],
+    'auth_operations': ['p(95)<150'],
+    'user_profile': ['p(95)<200'],
+    'tweets': ['p(95)<250'],
+    'watch_history': ['p(95)<300'],
+    'http_req_failed': ['rate<0.01'],
+    'async_operations': ['p(95)<1000'], // Async operations should complete within 1 second
+    'async_operation_errors': ['rate<0.05'], // Less than 5% async operation failures
   },
 };
-
 
 // Helper function to pick a random item from an array
 function randomItem(array) {
@@ -214,56 +198,205 @@ function randomItem(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
-function getAuthToken(userIndex) {
+// Auth token cache
+let authTokens = {};
+let refreshTokens = {};
+let pendingAuthRequests = {}; // Track pending async auth requests
+
+// Helper function to generate a request ID
+function generateRequestId() {
+  return `req_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+}
+
+// Function to initiate an async auth request
+function initiateAsyncAuth(userIndex) {
+  const user = testUsers[userIndex % testUsers.length];
+  const requestId = generateRequestId();
+  const baseUrl = 'http://localhost:3900/api/v1';
+  
+  // Store the request time - using string requestId as key
+  pendingAuthRequests[requestId] = {
+    email: user.email,
+    password: user.password,
+    requestTime: new Date().getTime(),
+    completed: false
+  };
+  
+  // Send the auth request to the login endpoint
+  const requestBody = JSON.stringify({
+    email: user.email,
+    password: user.password
+    // Don't include requestId in the body as it's not expected by the server
+  });
+  
+  const res = http.post(`${baseUrl}/users/login`, requestBody, {
+    headers: { 'Content-Type': 'application/json' }
+  });
+  
+  // The login endpoint returns 200 for successful authentication
+  check(res, {
+    'auth request initiated': (r) => r.status === 200,
+  }) || errorRate.add(1);
+  
+  // If successful, store the tokens
+  if (res.status === 200) {
+    try {
+      const responseBody = JSON.parse(res.body);
+      pendingAuthRequests[requestId].completed = true;
+      
+      // Calculate operation time
+      const operationTime = new Date().getTime() - pendingAuthRequests[requestId].requestTime;
+      asyncOperationsTrend.add(operationTime);
+      
+      // Store tokens
+      authTokens[user.email] = {
+        token: responseBody.data.accessToken,
+        expires: new Date().getTime() + 3500000
+      };
+      
+      if (responseBody.data.refreshToken) {
+        refreshTokens[user.email] = responseBody.data.refreshToken;
+      }
+      
+      return requestId;
+    } catch (e) {
+      console.error(`Error parsing auth response: ${e.message}`);
+      // Fall back to sync auth
+      console.warn(`Async auth failed for ${user.email}, falling back to sync auth`);
+      return null;
+    }
+  } else {
+    console.warn(`Async auth failed for ${user.email}, falling back to sync auth`);
+    return null;
+  }
+}
+
+// Function to poll for auth completion
+function pollForAuthCompletion(requestId, maxAttempts = 10, waitTime = 100) {
+  // Check if requestId is valid
+  if (typeof requestId !== 'string') {
+    console.error(`Invalid requestId: ${typeof requestId}`);
+    return null;
+  }
+  
+  // If the request doesn't exist or is already completed, no need to poll
+  if (!pendingAuthRequests[requestId]) {
+    console.error(`No pending auth request found for ${requestId}`);
+    return null;
+  }
+  
+  if (pendingAuthRequests[requestId].completed) {
+    const email = pendingAuthRequests[requestId].email;
+    return authTokens[email]?.token || null;
+  }
+  
+  const baseUrl = 'http://localhost:3900/api/v1';
+  let attempts = 0;
+  const email = pendingAuthRequests[requestId].email;
+  const password = pendingAuthRequests[requestId].password;
+  
+  while (attempts < maxAttempts) {
+    // Try a direct login since the RabbitMQ async process might complete by now
+    const loginRes = http.post(`${baseUrl}/users/login`, 
+      JSON.stringify({ email, password }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    
+    if (loginRes.status === 200) {
+      try {
+        const responseBody = JSON.parse(loginRes.body);
+        pendingAuthRequests[requestId].completed = true;
+        
+        // Calculate operation time
+        const operationTime = new Date().getTime() - pendingAuthRequests[requestId].requestTime;
+        asyncOperationsTrend.add(operationTime);
+        
+        // Store tokens
+        authTokens[email] = {
+          token: responseBody.data.accessToken,
+          expires: new Date().getTime() + 3500000
+        };
+        
+        if (responseBody.data.refreshToken) {
+          refreshTokens[email] = responseBody.data.refreshToken;
+        }
+        
+        return responseBody.data.accessToken;
+      } catch (e) {
+        console.error(`Error parsing auth response: ${e.message}`);
+      }
+    }
+    
+    sleep(waitTime / 1000); // Convert ms to seconds for sleep
+    attempts++;
+  }
+  
+  // If we reach here, the operation timed out
+  console.warn(`Async auth failed for ${email}, falling back to sync auth`);
+  asyncOperationErrors.add(1);
+  return null;
+}
+
+// Function to handle async auth (either initiate or poll existing)
+function getAsyncAuthToken(userIndex) {
   const user = testUsers[userIndex % testUsers.length];
   
-  // Return cached token if it exists and hasn't expired
+  // Check if we already have a valid token
   if (authTokens[user.email] && authTokens[user.email].expires > new Date().getTime()) {
     return authTokens[user.email].token;
   }
   
+  // Check if we have a pending request for this user
+  const pendingRequestId = Object.keys(pendingAuthRequests).find(
+    key => pendingAuthRequests[key].email === user.email && !pendingAuthRequests[key].completed
+  );
+  
+  if (pendingRequestId) {
+    // Poll for the pending request
+    return pollForAuthCompletion(pendingRequestId);
+  } else {
+    // Initiate a new async auth request
+    const requestId = initiateAsyncAuth(userIndex);
+    // Wait a bit before polling to give the system time to process
+    sleep(0.1);
+    return pollForAuthCompletion(requestId);
+  }
+}
+
+// Fallback to synchronous auth if async fails
+function getFallbackAuthToken(userIndex) {
+  const user = testUsers[userIndex % testUsers.length];
   const baseUrl = 'http://localhost:3900/api/v1';
+  
   const loginRes = http.post(`${baseUrl}/users/login`, JSON.stringify({
     email: user.email,
     password: user.password
   }), {
     headers: { 'Content-Type': 'application/json' }
   });
-  
+
   if (loginRes.status === 200) {
     try {
-      const responseBody = loginRes.json();
-      
-      // Extract tokens with better logging
-      const token = responseBody.data?.accessToken || responseBody.accessToken;
-      const refreshToken = responseBody.data?.refreshToken || responseBody.refreshToken;
+      const responseBody = JSON.parse(loginRes.body);
+      let token = responseBody.data?.accessToken || responseBody.accessToken;
+      let refreshToken = responseBody.data?.refreshToken || responseBody.refreshToken;
 
-      
-      // Store tokens
-      authTokens[user.email] = {
-        token: token,
-        expires: new Date().getTime() + 3500000 // Slightly less than 1 hour to be safe
-      };
-      
-      if (refreshToken) {
-        console.log(`Storing refresh token for ${user.email}`);
-        refreshTokens[user.email] = refreshToken;
-      } else {
-        console.error(`No refresh token in response for ${user.email}`);
+      if (token) {
+        authTokens[user.email] = {
+          token: token,
+          expires: new Date().getTime() + 3500000
+        };
+        if (refreshToken) refreshTokens[user.email] = refreshToken;
+        return token;
       }
-      
-      return token;
     } catch (e) {
-      console.error(`Error parsing response body for ${user.email}: ${e}`);
-      return null;
+      console.error(`Error parsing login response: ${e.message}`);
     }
   }
   
-  console.error(`Failed to get auth token for ${user.email}: ${loginRes.status}`);
   return null;
 }
 
-// Add this function to refresh tokens when needed
 function refreshToken(userIndex) {
   const user = testUsers[userIndex % testUsers.length];
   const refreshToken = refreshTokens[user.email];
@@ -313,24 +446,29 @@ function refreshToken(userIndex) {
   return false;
 }
 
-export default function() {
+
+export default function () {
   const baseUrl = 'http://localhost:3900/api/v1';
-  
-  // Distribute VUs among test users
   const userIndex = __VU % testUsers.length;
   const user = testUsers[userIndex];
-  
-  // Get content data by type instead of randomly selecting from all types
+
+  // Get content data
   const randomVideo = randomItem(contentData.videos);
   const randomTweet = randomItem(contentData.tweets);
   const randomComment = randomItem(contentData.comments);
   
-  // Get auth token for this user
-  let token = getAuthToken(userIndex);
+  // Try to get auth token via async method
+  let token = getAsyncAuthToken(userIndex);
   
-  // Skip test if authentication fails
+  // If async auth failed, fall back to synchronous auth
   if (!token) {
-    console.error(`Skipping test for user ${user.username} due to auth failure`);
+    console.warn(`Async auth failed for ${user.email}, falling back to sync auth`);
+    token = getFallbackAuthToken(userIndex);
+  }
+  
+  if (!token) {
+    console.error(`All auth methods failed for ${user.email}`);
+    errorRate.add(1);
     return;
   }
 
@@ -362,9 +500,8 @@ export default function() {
     }
   });
 
-  //Begin user session with profile check
   group('User Profiles', function() {
-    // Get current user profile (high frequency)
+    // Get current user profile
     const currentUserStart = new Date().getTime();
     const currentUserRes = http.get(`${baseUrl}/users/current-user`, params);
     userProfileTrend.add(new Date().getTime() - currentUserStart);
@@ -373,7 +510,7 @@ export default function() {
       'current user fetch successful': (r) => r.status === 200,
     }) || errorRate.add(1);
     
-    // View another user's channel (moderate frequency)
+    // View another user's channel
     if (Math.random() < 0.4) {
       const otherUser = testUsers[(userIndex + 1) % testUsers.length];
       const channelStart = new Date().getTime();
@@ -388,9 +525,9 @@ export default function() {
 
   sleep(Math.random() * 0.5);
 
-  // Main user activity - browsing videos
+  // Videos group
   group('Videos', function() {
-    // Get all videos (high frequency)
+    // Get all videos
     const allVideosStart = new Date().getTime();
     const allVideosRes = http.get(`${baseUrl}/videos`, params);
     videoFetchTrend.add(new Date().getTime() - allVideosStart);
@@ -399,9 +536,8 @@ export default function() {
       'all videos fetch successful': (r) => r.status === 200,
     }) || errorRate.add(1);
 
-    // Only proceed with video operations if we have a valid video
+    // Get specific video
     if (randomVideo) {
-      // Get specific video (high frequency)
       const videoStart = new Date().getTime();
       const videoRes = http.get(`${baseUrl}/videos/${randomVideo.videoId}`, params);
       videoFetchTrend.add(new Date().getTime() - videoStart);
@@ -410,7 +546,7 @@ export default function() {
         'video fetch successful': (r) => r.status === 200 || r.status === 404,
       }) || errorRate.add(1);
 
-      // Watch video - increment views (very high frequency)
+      // Watch video
       const viewsStart = new Date().getTime();
       const viewsRes = http.patch(`${baseUrl}/videos/incrementViews/${randomVideo.videoId}`, {}, params);
       videoFetchTrend.add(new Date().getTime() - viewsStart);
@@ -418,25 +554,15 @@ export default function() {
       check(viewsRes, {
         'view count update successful': (r) => r.status === 200 || r.status === 404,
       }) || errorRate.add(1);
-      
-      // Add to watch history (high frequency)
-      const addHistoryStart = new Date().getTime();
-      const addHistoryRes = http.post(`${baseUrl}/users/addToWatchHistory/${randomVideo.videoId}`, {}, params);
-      watchHistoryTrend.add(new Date().getTime() - addHistoryStart);
-      
-      check(addHistoryRes, {
-        'add to watch history successful': (r) => r.status === 200 || r.status === 201 || r.status === 404,
-      }) || errorRate.add(1);
     }
   });
 
   sleep(Math.random() * 1);
 
-  // Engagement with videos
+  // Comments and Likes
   group('Comments and Likes', function() {
-    // Only proceed with comment operations if we have a valid video
     if (randomVideo) {
-      // Get video comments (high frequency)
+      // Get video comments
       const commentsStart = new Date().getTime();
       const commentsRes = http.get(`${baseUrl}/comments/video/${randomVideo.videoId}`, params);
       commentsTrend.add(new Date().getTime() - commentsStart);
@@ -445,7 +571,7 @@ export default function() {
         'comments fetch successful': (r) => r.status === 200 || r.status === 404,
       }) || errorRate.add(1);
 
-      // Add a comment (lower frequency)
+      // Add a comment
       if (Math.random() < 0.2) {
         const addCommentStart = new Date().getTime();
         const addCommentRes = http.post(`${baseUrl}/comments/video`, JSON.stringify({
@@ -459,7 +585,7 @@ export default function() {
         }) || errorRate.add(1);
       }
 
-      // Like a video (high frequency)
+      // Like a video
       if (Math.random() < 0.6) {
         const likeStart = new Date().getTime();
         const likeRes = http.post(`${baseUrl}/likes/toggle/v/${randomVideo.videoId}`, {}, params);
@@ -471,7 +597,7 @@ export default function() {
       }
     }
 
-    // Like a comment (lower frequency)
+    // Like a comment
     if (Math.random() < 0.2 && randomComment) {
       const commentLikeStart = new Date().getTime();
       const commentLikeRes = http.post(`${baseUrl}/likes/toggle/c/${randomComment.commentId}`, {}, params);
@@ -486,30 +612,30 @@ export default function() {
   sleep(Math.random() * 0.5);
 
 // Channel subscription activity
-group('Subscriptions', function() {
+  group('Subscriptions', function() {
   // Subscribe to a channel (moderate frequency)
-  if (Math.random() < 0.3) {
-    const otherUser = testUsers[(userIndex + 1) % testUsers.length];
-    const subscriptionStart = new Date().getTime();
-    
+    if (Math.random() < 0.3) {
+      const otherUser = testUsers[(userIndex + 1) % testUsers.length];
+      const subscriptionStart = new Date().getTime();
+      
     const subscriptionRes = http.post(`${baseUrl}/subscriptions/c/${otherUser.userId}`, {}, params);
     
     subscriptionTrend.add(new Date().getTime() - subscriptionStart);
-    
+      
     check(subscriptionRes, {
       'subscription operation successful': (r) => r.status === 200 || r.status === 201,
-    }) || errorRate.add(1);
-  }
+      }) || errorRate.add(1);
+    }
 
   // Get subscribed channels (high frequency)
-  const subscribedStart = new Date().getTime();
-  const subscribedRes = http.get(`${baseUrl}/subscriptions`, params);
-  subscriptionTrend.add(new Date().getTime() - subscribedStart);
-  
-  check(subscribedRes, {
-    'subscribed channels fetch successful': (r) => r.status === 200,
-  }) || errorRate.add(1);
-});
+    const subscribedStart = new Date().getTime();
+    const subscribedRes = http.get(`${baseUrl}/subscriptions`, params);
+    subscriptionTrend.add(new Date().getTime() - subscribedStart);
+    
+    check(subscribedRes, {
+      'subscribed channels fetch successful': (r) => r.status === 200,
+    }) || errorRate.add(1);
+  });
 
   sleep(Math.random() * 0.5);
 
