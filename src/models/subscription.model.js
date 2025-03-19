@@ -2,7 +2,7 @@
 subscriptions [icon: money] {
   id string pk
   subscriber ObjectId users
-  channel ObjectId users
+  user ObjectId users
   createdAt Date
   updatedAt Date
 }
@@ -16,7 +16,7 @@ const subscriptionSchema = new Schema(
       type: Schema.Types.ObjectId, // one who is subscribing
       ref: "User",
     },
-    channel: {
+    user: {
       type: Schema.Types.ObjectId, // one to whom 'subscriber' is subscribing
       ref: "User",
     },

@@ -2,70 +2,106 @@ import { PrismaClient } from "@prisma/client";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import redisClient from "../config/redis.js";
+import { REDIS_KEYS } from "../constants/redisKeys.js";
+import dotenv from "dotenv"
+import amqp from "amqplib";
+
+dotenv.config();
 
 const prisma = new PrismaClient();
+const RABBITMQ_URL = process.env.RABBITMQ_URL || "amqp://localhost";
+const QUEUE_NAME = process.env.QUEUE_NAME || "subscription_queue";
+
+// Create a connection pool or singleton
+let rabbitConnection = null;
+let rabbitChannel = null;
+
+async function getChannel() {
+  if (!rabbitChannel || !rabbitConnection) {
+    rabbitConnection = await amqp.connect(RABBITMQ_URL);
+    rabbitChannel = await rabbitConnection.createChannel();
+    
+    // Make sure the queue exists
+    await rabbitChannel.assertQueue(QUEUE_NAME, {
+      durable: true // Queue survives broker restart
+    });
+  }
+  return rabbitChannel;
+}
 
 const toggleSubscription = asyncHandler(async (req, res) => {
-  const { channelId } = req.params;
+  const { userId } = req.params;
   const subscriberId = req.user.id;
-  
-  if (!channelId) {
-    throw new ApiError(400, "Channel ID is required");
+
+  if (!userId) {
+    throw new ApiError(400, "user is required");
   }
 
   try {
-    // Check if channel exists
-    const channel = await prisma.user.findUnique({
-      where: { id: channelId }
+    // Check if channel exists (keep this validation)
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
     });
-    
-    if (!channel) {
-      throw new ApiError(404, "Channel not found");
+
+    if (!user) {
+      throw new ApiError(404, "user not found");
     }
-    
-    if (channelId === subscriberId) {
+
+    if (userId === subscriberId) {
       throw new ApiError(400, "You cannot subscribe to your own channel");
     }
     
-    // Check if already subscribed
+    // Check if already subscribed (keep this to determine action type)
     const existingSubscription = await prisma.subscription.findUnique({
       where: {
-        subscriberId_channelId: {
-          subscriberId: subscriberId,
-          channelId: channelId
+        subscriberId_userId: {
+          subscriberId,
+          userId
         }
       }
     });
     
-    if (existingSubscription) {
-      // Unsubscribe
-      await prisma.subscription.delete({
-        where: {
-          id: existingSubscription.id
-        }
-      });
-      
-      return res.status(200).json(
-        new ApiResponse(200, { subscribed: false }, "Unsubscribed successfully")
-      );
-    } else {
-      // Subscribe
-      const subscription = await prisma.subscription.create({
-        data: {
-          subscriberId: subscriberId,
-          channelId: channelId
-        }
-      });
-      
-      return res.status(200).json(
-        new ApiResponse(200, { subscribed: true }, "Subscribed successfully")
-      );
-    }
+    // Instead of processing directly, send to RabbitMQ
+    const subscriptionAction = existingSubscription ? 'UNSUBSCRIBE' : 'SUBSCRIBE';
+    console.log(`Subscription action queued: ${subscriptionAction} for userId: ${userId} by subscriberId: ${subscriberId}`);
+    
+    const channel = await getChannel();
+    
+    // Publish message to RabbitMQ
+    await channel.sendToQueue(
+      QUEUE_NAME, 
+      Buffer.from(JSON.stringify({
+        action: subscriptionAction,
+        userId,
+        subscriberId,
+        username: user.username,
+        timestamp: new Date().toISOString()
+      })),
+      { 
+        persistent: true // Message survives broker restart
+      }
+    );
+    
+    // Respond immediately with the expected new state
+    const result = { 
+      subscribed: subscriptionAction === 'SUBSCRIBE', 
+      success: true 
+    };
+    
+    return res.status(200).json(
+      new ApiResponse(
+        200, 
+        result, 
+        subscriptionAction === 'SUBSCRIBE' ? "Subscription queued" : "Unsubscription queued"
+      )
+    );
   } catch (error) {
     console.error("Subscription error:", error);
     throw new ApiError(500, `Subscription operation failed: ${error.message}`);
   }
 });
+
 const getUserChannelSubscribers = asyncHandler(async (req, res) => {
   const { userId } = req.params;
   const { page = 1, limit = 10 } = req.query;
@@ -84,9 +120,22 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const cacheKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_p${page}_l${limit}`;
+
+    // Try to get data from cache
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(
+        new ApiResponse(
+          200,
+          JSON.parse(cachedData),
+          "Subscribers fetched from cache successfully"
+        )
+      );
+    }
 
     const subscriptions = await prisma.subscription.findMany({
-      where: { channelId: userId },
+      where: { userId: userId },
       include: {
         subscriber: {
           select: {
@@ -105,7 +154,7 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
     });
 
     const totalSubscribers = await prisma.subscription.count({
-      where: { channelId: userId }
+      where: { userId: userId }
     });
 
     const subscribers = subscriptions.map(sub => ({
@@ -116,15 +165,31 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
       subscribedAt: sub.createdAt
     }));
 
+    const responseData = { 
+      subscribers,
+      totalSubscribers,
+      page: parseInt(page),
+      totalPages: Math.ceil(totalSubscribers / parseInt(limit))
+    };
+
+    // Cache the result
+    await redisClient.set(
+      cacheKey,
+      JSON.stringify(responseData),
+      {EX: 3600}
+    );
+
+    // Also cache the total subscribers count separately for quick access
+    await redisClient.set(
+      `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_count`,
+      totalSubscribers.toString(),
+      {EX: 3600}
+    );
+
     return res.status(200).json(
       new ApiResponse(
         200, 
-        { 
-          subscribers,
-          totalSubscribers,
-          page: parseInt(page),
-          totalPages: Math.ceil(totalSubscribers / parseInt(limit))
-        }, 
+        responseData, 
         "Subscribers fetched successfully"
       )
     );
@@ -135,7 +200,6 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
 
 const getSubscribedChannels = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
-
   const userId = req.user.id;
 
   if (!userId) {
@@ -152,11 +216,24 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
     }
     
     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const cacheKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}_p${page}_l${limit}`;
+    
+    // Try to get data from cache
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json(
+        new ApiResponse(
+          200,
+          JSON.parse(cachedData),
+          "Subscribed channels fetched from cache successfully"
+        )
+      );
+    }
     
     const subscriptions = await prisma.subscription.findMany({
       where: { subscriberId: userId },
       include: {
-        channel: {
+        user: {
           select: {
             id: true,
             username: true,
@@ -177,25 +254,41 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
       where: { subscriberId: userId }
     });
     
-    const channels = subscriptions.map(sub => ({
-      id: sub.channel.id,
-      username: sub.channel.username,
-      fullName: sub.channel.fullName,
-      avatar: sub.channel.avatar,
-      coverImage: sub.channel.coverImage,
+    const users = subscriptions.map(sub => ({
+      id: sub.user.id,
+      username: sub.user.username,
+      fullName: sub.user.fullName,
+      avatar: sub.user.avatar,
+      coverImage: sub.user.coverImage,
       subscribedAt: sub.createdAt
     }));
+    
+    const responseData = { 
+      users,
+      totalSubscriptions,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(totalSubscriptions / parseInt(limit))
+    };
+    
+    // Cache the result
+    await redisClient.set(
+      cacheKey,
+      JSON.stringify(responseData),
+      {EX: 3600}
+    );
+    
+    // Also cache the total subscriptions count separately
+    await redisClient.set(
+      `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}_count`,
+      totalSubscriptions.toString(),
+      {EX: 3600}
+    );
     
     return res.status(200).json(
       new ApiResponse(
         200, 
-        { 
-          channels,
-          totalSubscriptions,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          totalPages: Math.ceil(totalSubscriptions / parseInt(limit))
-        }, 
+        responseData, 
         "Subscribed channels fetched successfully"
       )
     );

@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import  redisClient  from "../config/redis.js";
+import { REDIS_KEYS } from "../constants/redisKeys.js";
 
 const prisma = new PrismaClient();
 
@@ -50,6 +52,23 @@ const createPlaylist = asyncHandler(async (req, res) => {
       }
     });
 
+    // Cache the new playlist
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST}${playlist.id}`,
+      JSON.stringify(playlist),
+      {EX: 3600},
+    );
+
+    // Update user playlists cache
+    await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+
+    // Cache playlist videos
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST_VIDEOS}${playlist.id}`,
+      JSON.stringify(playlist.videos),
+      {EX: 3600}
+    );
+
     res.status(201).json(
       new ApiResponse(201, playlist, "Playlist created successfully")
     );
@@ -66,6 +85,15 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
   }
 
   try {
+    // Check if user playlists are cached
+    const cachedPlaylists = await redisClient.get(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+    
+    if (cachedPlaylists) {
+      return res.status(200).json(
+        new ApiResponse(200, JSON.parse(cachedPlaylists), "User playlists fetched from cache")
+      );
+    }
+
     const playlists = await prisma.playlist.findMany({
       where: { owner: userId },
       include: {
@@ -94,6 +122,13 @@ const getUserPlaylists = asyncHandler(async (req, res) => {
       }
     });
 
+    // Cache the user playlists
+    await redisClient.set(
+      `${REDIS_KEYS.USER_PLAYLISTS}${userId}`,
+      JSON.stringify(playlists),
+      {EX: 3600}
+    );
+
     res.status(200).json(
       new ApiResponse(200, playlists, "User playlists fetched successfully")
     );
@@ -110,6 +145,15 @@ const getPlaylistById = asyncHandler(async (req, res) => {
   }
 
   try {
+    // Check if playlist is cached
+    const cachedPlaylist = await redisClient.get(`${REDIS_KEYS.PLAYLIST}${playlistId}`);
+    
+    if (cachedPlaylist) {
+      return res.status(200).json(
+        new ApiResponse(200, JSON.parse(cachedPlaylist), "Playlist fetched from cache")
+      );
+    }
+
     const playlist = await prisma.playlist.findUnique({
       where: { id: playlistId },
       include: {
@@ -142,6 +186,20 @@ const getPlaylistById = asyncHandler(async (req, res) => {
     if (!playlist) {
       throw new ApiError(404, "Playlist not found");
     }
+
+    // Cache the playlist
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST}${playlistId}`,
+      JSON.stringify(playlist),
+      {EX: 3600}
+    );
+
+    // Cache playlist videos
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`,
+      JSON.stringify(playlist.videos),
+      {EX: 3600}
+    );
 
     res.status(200).json(
       new ApiResponse(200, playlist, "Playlist fetched successfully")
@@ -206,6 +264,26 @@ const addVideoToPlaylist = asyncHandler(async (req, res) => {
       }
     });
 
+    // Update cache
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST}${playlistId}`,
+      JSON.stringify(updatedPlaylist),
+      {EX: 3600}
+    );
+
+    // Update playlist videos cache
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`,
+      JSON.stringify(updatedPlaylist.videos),
+      {EX: 3600}
+    );
+
+    // Invalidate user playlists cache
+    await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST}${playlistId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`);
+
+
     res.status(200).json(
       new ApiResponse(200, updatedPlaylist, "Video added to playlist successfully")
     );
@@ -260,6 +338,25 @@ const removeVideoFromPlaylist = asyncHandler(async (req, res) => {
       }
     });
 
+    // Update cache
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST}${playlistId}`,
+      JSON.stringify(updatedPlaylist),
+      {EX: 3600}
+    );
+
+    // Update playlist videos cache
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`,
+      JSON.stringify(updatedPlaylist.videos),
+      {EX: 3600}
+    );
+
+    // Invalidate user playlists cache
+    await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST}${playlistId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`);
+
     res.status(200).json(
       new ApiResponse(200, updatedPlaylist, "Video removed from playlist successfully")
     );
@@ -293,6 +390,11 @@ const deletePlaylist = asyncHandler(async (req, res) => {
     await prisma.playlist.delete({
       where: { id: playlistId }
     });
+
+    // Invalidate user playlists cache
+    await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST}${playlistId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`);
 
     res.status(200).json(
       new ApiResponse(200, {}, "Playlist deleted successfully")
@@ -331,8 +433,45 @@ const updatePlaylist = asyncHandler(async (req, res) => {
 
     const updatedPlaylist = await prisma.playlist.update({
       where: { id: playlistId },
-      data: updateData
+      data: updateData,
+      include: {
+        videos: {
+          where: {
+            isPublished: true
+          },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            thumbnail: true,
+            duration: true,
+            views: true,
+            owner: true,
+            createdAt: true
+          }
+        },
+        user: {
+          select: {
+            id: true,
+            username: true,
+            fullName: true,
+            avatar: true
+          }
+        }
+      }
     });
+
+    // Update cache
+    await redisClient.set(
+      `${REDIS_KEYS.PLAYLIST}${playlistId}`,
+      JSON.stringify(updatedPlaylist),
+      {EX: 3600}
+    );
+
+    // Invalidate user playlists cache
+    await redisClient.del(`${REDIS_KEYS.USER_PLAYLISTS}${userId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST}${playlistId}`);
+    await redisClient.del(`${REDIS_KEYS.PLAYLIST_VIDEOS}${playlistId}`);
 
     res.status(200).json(
       new ApiResponse(200, updatedPlaylist, "Playlist updated successfully")
