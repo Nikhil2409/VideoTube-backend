@@ -10,33 +10,47 @@ const prisma = new PrismaClient();
 
 export const verifyJWT = asyncHandler(async (req, res, next) => {
     try {
-        const token = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "");
+        // Look for token in multiple places with detailed logging
+        console.log("Auth middleware called for path:", req.path);
+        
+        const token = req.cookies?.accessToken || 
+                    req.header("Authorization")?.replace("Bearer ", "") ||
+                    req.headers["x-access-token"];
+        
+        console.log("Cookie token:", req.cookies?.accessToken ? "Present" : "Not present");
+        console.log("Auth header:", req.header("Authorization") ? "Present" : "Not present");
+        console.log("x-access-token:", req.headers["x-access-token"] ? "Present" : "Not present");
         
         if (!token) {
+            console.log("No token found in request");
             throw new ApiError(401, "Unauthorized request");
         }
         
-        // Add consistent secret key handling and debug logging
-        const secret = process.env.ACCESS_TOKEN_SECRET || "fallback-access-secret-key";
-        //console.log("Token verification attempt with token:", token.substring(0, 15) + "...");
+        // Add consistent secret key handling
+        const secret = process.env.ACCESS_TOKEN_SECRET;
+        if (!secret) {
+            console.error("ACCESS_TOKEN_SECRET is not set in environment");
+            throw new ApiError(500, "Server configuration error");
+        }
+        
+        console.log("Token verification attempt with token:", token.substring(0, 10) + "...");
         
         let decodedToken;
         try {
             decodedToken = jwt.verify(token, secret);
-            //console.log("Decoded token:", decodedToken);
+            console.log("Token verified successfully for user ID:", decodedToken.id);
         } catch (jwtError) {
             console.error("JWT verification failed:", jwtError.message);
-            // Return immediately instead of throwing to avoid error cascade
-            return next(new ApiError(401, `Token verification failed: ${jwtError.message}`));
+            throw new ApiError(401, "Invalid or expired token");
         }
         
         // Extra check to prevent undefined id
         if (!decodedToken || !decodedToken.id) {
             console.error("Token has no user ID");
-            return next(new ApiError(401, "Invalid token structure - missing user ID"));
+            throw new ApiError(401, "Invalid token structure");
         }
         
-        //console.log("Looking up user with ID:", decodedToken.id);
+        console.log("Looking up user with ID:", decodedToken.id);
         const user = await prisma.user.findUnique({
             where: {
                 id: decodedToken.id
@@ -53,14 +67,17 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
         
         if (!user) {
             console.log("No user found with ID:", decodedToken.id);
-            return next(new ApiError(401, "Invalid Access Token - user not found"));
+            throw new ApiError(401, "Invalid Access Token - user not found");
         }
         
+        console.log("User authenticated successfully:", user.username);
         req.user = user;
         next();
     } catch (error) {
         console.error("Auth middleware error:", error);
-        // Use direct return instead of throwing to avoid potential loop
-        return next(new ApiError(500, "Authentication process failed"));
+        if (error instanceof ApiError) {
+            throw error;
+        }
+        throw new ApiError(401, "Authentication process failed");
     }
 });
