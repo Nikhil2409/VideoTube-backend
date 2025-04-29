@@ -11,7 +11,6 @@ import dotenv from "dotenv";
 // Fix dotenv loading
 dotenv.config();
 
-
 // Initialize Express app
 const app = express()
 
@@ -35,6 +34,7 @@ cron.schedule('*/1 * * * *', async () => {
 });
 
 // CORS and other middleware setup
+console.log(process.env.CORS_ORIGIN);
 app.use(cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:3900",
     credentials: true 

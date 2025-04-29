@@ -5,6 +5,7 @@ import { httpServer, app } from "./app.js";
 import dotenv from "dotenv";
 import connectDB from "./db/index.js";
 dotenv.config({ path: "./src/.env" });
+import authClient from "./workers/authClient.js";
 
 const morganFormat = ":method :url :status :response-time ms";
 
