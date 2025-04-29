@@ -7,6 +7,13 @@ import { REDIS_KEYS } from "../constants/redisKeys.js";
 
 const prisma = new PrismaClient();
 
+const CACHE_TTL = {
+  SHORT: 60 * 5,        // 5 minutes
+  MEDIUM: 60 * 60,      // 1 hour
+  LONG: 60 * 60 * 24,   // 24 hours
+  VIEW_COUNT: 60 * 15   // 15 minutes for view counts before DB sync
+};
+
 const toggleVideoLike = asyncHandler(async (req, res) => {
   const { videoId } = req.params;
   const userId = req.user.id;
@@ -17,10 +24,18 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
     if (existingLike) {
       await prisma.like.delete({ where: { id: existingLike.id } });
       await redisClient.del(`${REDIS_KEYS.VIDEO_LIKES}${videoId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_VIDEO_LIKES}${userId}`);
+      // Clear the video cache as well
+      await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}:user:${userId}`);
+      await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
       return res.status(200).json(new ApiResponse(200, { liked: false }, "Unliked successfully"));
     } else {
       await prisma.like.create({ data: { likedBy: userId, videoId } });
       await redisClient.del(`${REDIS_KEYS.VIDEO_LIKES}${videoId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_VIDEO_LIKES}${userId}`);
+      // Clear the video cache as well
+      await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}:user:${userId}`);
+      await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
       return res.status(200).json(new ApiResponse(200, { liked: true }, "Liked successfully"));
     }
   } catch (error) {
@@ -28,6 +43,40 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
     return res.status(500).json(new ApiResponse(500, null, "Error toggling like"));
   }
 });
+
+// Helper function to get Redis view count for a video
+const getRedisViewCount = async (videoId) => {
+  const viewKey = `${REDIS_KEYS.VIDEO_VIEWS}${videoId}`;
+  const count = await redisClient.get(viewKey);
+  return count ? parseInt(count) : 0;
+};
+
+// Helper function to enrich video objects with Redis view counts
+const enrichVideosWithViewCounts = async (videos) => {
+  if (!videos || videos.length === 0) return videos;
+  
+  // Create a pipeline for batch Redis operations
+  const pipeline = redisClient.multi();
+  
+  // Queue up all the get operations
+  videos.forEach(video => {
+    const viewKey = `${REDIS_KEYS.VIDEO_VIEWS}${video.id}`;
+    pipeline.get(viewKey);
+  });
+  
+  // Execute the pipeline and get all results
+  const viewCounts = await pipeline.exec();
+  
+  // Map the results back to the videos
+  return videos.map((video, index) => {
+    const redisViews = viewCounts[index] ? parseInt(viewCounts[index]) || 0 : 0;
+    return {
+      ...video,
+      views: video.views + redisViews // Add Redis views to DB views
+    };
+  });
+};
+
 
 const getLikedVideos = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -37,7 +86,13 @@ const getLikedVideos = asyncHandler(async (req, res) => {
   // Check Redis cache
   const cachedVideos = await redisClient.get(cacheKey);
   if (cachedVideos) {
-    return res.status(200).json(new ApiResponse(200, JSON.parse(cachedVideos), "Liked videos fetched from cache"));
+    // Even for cached videos, enrich with Redis view counts
+    const videos = JSON.parse(cachedVideos);
+    const enrichedVideos = await enrichVideosWithViewCounts(videos);
+    
+    return res.status(200).json(
+      new ApiResponse(200, enrichedVideos, "Liked videos fetched from cache")
+    );
   }
 
   try {
@@ -49,30 +104,42 @@ const getLikedVideos = asyncHandler(async (req, res) => {
       include: {
         video: {
           select: {
-            id :true,        
-            title :true,       
-            description:true,  
-            videoFile :true,   
-            thumbnail :true,   
-            duration  :true,   
+            id: true,        
+            title: true,       
+            description: true,  
+            videoFile: true,   
+            thumbnail: true,   
+            duration: true,
             views: true,
             duration: true,
-            videoFile:true,
+            videoFile: true,
             createdAt: true,
           }
         }
       }
     });
     
+    // Filter out null videos
     const formattedVideos = likedVideos.map(like => like.video).filter(Boolean);
-
-    // Cache result
-    await redisClient.set(cacheKey, JSON.stringify(formattedVideos), { EX: 1800 });
     
-    return res.status(200).json(new ApiResponse(200, formattedVideos, "Liked videos fetched successfully"));
+    // Enrich videos with Redis view counts
+    const enrichedVideos = await enrichVideosWithViewCounts(formattedVideos);
+
+    // Cache the original database result (without Redis view counts)
+    await redisClient.set(
+      cacheKey, 
+      JSON.stringify(formattedVideos), 
+      { EX: CACHE_TTL.MEDIUM }
+    );
+    
+    return res.status(200).json(
+      new ApiResponse(200, enrichedVideos, "Liked videos fetched successfully")
+    );
   } catch (error) {
     console.error("Get liked videos error:", error);
-    return res.status(500).json(new ApiResponse(500, null, "Error fetching liked videos"));
+    return res.status(500).json(
+      new ApiResponse(500, null, "Error fetching liked videos")
+    );
   }
 });
 

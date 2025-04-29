@@ -50,22 +50,28 @@ class AuthClient {
     }
   }
 
-  async sendRequest(queue, message) {
-    return new Promise((resolve, reject) => {
-      const correlationId = uuidv4();
-      console.log(`[AuthClient] Sending request to queue "${queue}" with correlationId: ${correlationId}`);
+// Enhanced error handling and logging
+async sendRequest(queue, message) {
+  return new Promise((resolve, reject) => {
+    const correlationId = uuidv4();
+    const timeout = setTimeout(() => {
+      delete this.callbacks[correlationId];
+      reject(new Error(`Request timeout for correlationId: ${correlationId}`));
+    }, 10000); // 10-second timeout
 
-      this.callbacks[correlationId] = (response) => {
-        if (response.error) {
-          console.error(`[AuthClient] Error response for correlationId ${correlationId}: ${response.error}`);
-          reject(new Error(response.error));
-        } else {
-          console.log(`[AuthClient] Successful response for correlationId ${correlationId}`);
-          resolve(response);
-        }
-      };
+    this.callbacks[correlationId] = (response) => {
+      clearTimeout(timeout);
+      
+      if (response.error) {
+        console.error(`[AuthClient] Detailed error for correlationId ${correlationId}:`, response.error);
+        reject(new Error(response.error));
+      } else {
+        console.log(`[AuthClient] Full response for correlationId ${correlationId}:`, response);
+        resolve(response);
+      }
+    };
 
-      // Send the message
+    try {
       this.channel.sendToQueue(
         queue,
         Buffer.from(JSON.stringify(message)),
@@ -75,8 +81,13 @@ class AuthClient {
           persistent: true
         }
       );
-    });
-  }
+    } catch (sendError) {
+      clearTimeout(timeout);
+      console.error('[AuthClient] Message send error:', sendError);
+      reject(sendError);
+    }
+  });
+}
 
   async generateTokens(userId) {
     console.log(`[AuthClient] Generating tokens for userId: ${userId}`);

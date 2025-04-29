@@ -46,6 +46,39 @@ const invalidateCache = async (keys) => {
   }
 };
 
+// Helper function to get Redis view count for a video
+const getRedisViewCount = async (videoId) => {
+  const viewKey = `${REDIS_KEYS.VIDEO_VIEWS}${videoId}`;
+  const count = await redisClient.get(viewKey);
+  return count ? parseInt(count) : 0;
+};
+
+// Helper function to enrich video objects with Redis view counts
+const enrichVideosWithViewCounts = async (videos) => {
+  if (!videos || videos.length === 0) return videos;
+  
+  // Create a pipeline for batch Redis operations
+  const pipeline = redisClient.multi();
+  
+  // Queue up all the get operations
+  videos.forEach(video => {
+    const viewKey = `${REDIS_KEYS.VIDEO_VIEWS}${video.id}`;
+    pipeline.get(viewKey);
+  });
+  
+  // Execute the pipeline and get all results
+  const viewCounts = await pipeline.exec();
+  
+  // Map the results back to the videos
+  return videos.map((video, index) => {
+    const redisViews = viewCounts[index] ? parseInt(viewCounts[index]) || 0 : 0;
+    return {
+      ...video,
+      views: video.views + redisViews // Add Redis views to DB views
+    };
+  });
+};
+
 const getAllVideos = asyncHandler(async (req, res) => {
   const cacheKey = REDIS_KEYS.ALL_VIDEOS;
   
@@ -54,9 +87,13 @@ const getAllVideos = asyncHandler(async (req, res) => {
   
   if (cachedVideos) {
     const videos = JSON.parse(cachedVideos);
+    
+    // Enrich with Redis view counts even for cached videos
+    const enrichedVideos = await enrichVideosWithViewCounts(videos);
+    
     return res
       .status(200)
-      .json(new ApiResponse(200, videos, "Videos fetched from cache"));
+      .json(new ApiResponse(200, enrichedVideos, "Videos fetched from cache"));
   }
   
   // If not in cache, fetch from database
@@ -69,16 +106,19 @@ const getAllVideos = asyncHandler(async (req, res) => {
     }
   });
 
+  // Enrich videos with Redis view counts
+  const enrichedVideos = await enrichVideosWithViewCounts(videos);
+
   // Store in Redis cache with TTL
   await redisClient.set(
     cacheKey, 
-    JSON.stringify(videos),
+    JSON.stringify(videos), // Store original DB data in cache
     { EX: CACHE_TTL.MEDIUM }
   );
   
   return res
     .status(200)
-    .json(new ApiResponse(200, videos, "Videos fetched successfully"));
+    .json(new ApiResponse(200, enrichedVideos, "Videos fetched successfully"));
 });
 
 const getVideoById = asyncHandler(async (req, res) => {
@@ -91,15 +131,18 @@ const getVideoById = asyncHandler(async (req, res) => {
 
   try {
     // Define cache key based on authentication state for personalized cache
-    const cacheKey = userId 
-      ? `${REDIS_KEYS.VIDEO}${videoId}:user:${userId}` 
-      : `${REDIS_KEYS.VIDEO}${videoId}`;
+    const cacheKey = `${REDIS_KEYS.VIDEO}${videoId}`;
     
     // Check if video exists in Redis cache
     const cachedVideo = await redisClient.get(cacheKey);
     
     if (cachedVideo) {
       const videoData = JSON.parse(cachedVideo);
+      
+      // Get Redis view count and add to cached video data
+      const redisViews = await getRedisViewCount(videoId);
+      videoData.views = videoData.views + redisViews;
+      
       return res
         .status(200)
         .json(new ApiResponse(200, videoData, "Video fetched from cache"));
@@ -205,12 +248,16 @@ const getVideoById = asyncHandler(async (req, res) => {
       });
     }
 
-    // Store in cache with appropriate TTL
+    // Store base video object in cache with appropriate TTL
     await redisClient.set(
       cacheKey,
       JSON.stringify(videoResponse),
       { EX: CACHE_TTL.MEDIUM }
     );
+
+    // Get Redis view count and add to response
+    const redisViews = await getRedisViewCount(videoId);
+    videoResponse.views = videoResponse.views + redisViews;
 
     // Return the video with all necessary information
     return res
@@ -282,7 +329,7 @@ const incrementViewCount = asyncHandler(async(req, res) => {
     // Return a modified video object with the Redis view count
     video = {
       ...video,
-      views: video.views + currentViews - 1 // Adjust for accurate display
+      views: video.views + parseInt(currentViews) // Include all Redis views
     };
     
     // Invalidate relevant caches
@@ -295,9 +342,11 @@ const incrementViewCount = asyncHandler(async(req, res) => {
     if (userId) {
       keysToInvalidate.push(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
       keysToInvalidate.push(`${REDIS_KEYS.VIDEO}${videoId}:user:${userId}`); // Important: invalidate the user-specific video cache
+      keysToInvalidate.push(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
+      keysToInvalidate.push(`${REDIS_KEYS.ALL_VIDEOS}`);
+      keysToInvalidate.push(`${REDIS_KEYS.USER_VIDEOS_BY_USERNAME}${video.user.username}`);
     }
-    
-    await invalidateCache(keysToInvalidate);
+
     
     return res
       .status(200)
@@ -633,9 +682,13 @@ const ownedById = asyncHandler(async (req, res) => {
     
     if (cachedVideos) {
       const videos = JSON.parse(cachedVideos);
+      
+      // Enrich videos with Redis view counts
+      const enrichedVideos = await enrichVideosWithViewCounts(videos);
+      
       return res.status(200).json({
         success: true,
-        videos: videos.length ? videos : [],
+        videos: enrichedVideos.length ? enrichedVideos : [],
         message: videos.length ? "Videos fetched from cache" : "No videos found for this user"
       });
     }
@@ -673,7 +726,10 @@ const ownedById = asyncHandler(async (req, res) => {
       }
     });
     
-    // Store in Redis cache with TTL
+    // Enrich videos with Redis view counts
+    const enrichedVideos = await enrichVideosWithViewCounts(videos);
+    
+    // Store in Redis cache with TTL (store original DB data)
     await redisClient.set(
       cacheKey,
       JSON.stringify(videos),
@@ -682,7 +738,7 @@ const ownedById = asyncHandler(async (req, res) => {
     
     return res.status(200).json({
       success: true,
-      videos: videos.length ? videos : [],
+      videos: enrichedVideos.length ? enrichedVideos : [],
       message: videos.length ? undefined : "No videos found for this user"
     });
   } catch (error) {
@@ -708,9 +764,13 @@ const ownedByName = asyncHandler(async (req, res) => {
     
     if (cachedVideos) {
       const videos = JSON.parse(cachedVideos);
+      
+      // Enrich videos with Redis view counts
+      const enrichedVideos = await enrichVideosWithViewCounts(videos);
+      
       return res.status(200).json({
         success: true,
-        videos: videos.length ? videos : [],
+        videos: enrichedVideos.length ? enrichedVideos : [],
         message: videos.length ? "Videos fetched from cache" : "No videos found for this user"
       });
     }
@@ -749,7 +809,10 @@ const ownedByName = asyncHandler(async (req, res) => {
       }
     });
     
-    // Store in Redis cache with TTL
+    // Enrich videos with Redis view counts
+    const enrichedVideos = await enrichVideosWithViewCounts(videos);
+    
+    // Store in Redis cache with TTL (store original DB data)
     await redisClient.set(
       cacheKey,
       JSON.stringify(videos),
@@ -758,7 +821,7 @@ const ownedByName = asyncHandler(async (req, res) => {
     
     return res.status(200).json({
       success: true,
-      videos: videos.length ? videos : [],
+      videos: enrichedVideos.length ? enrichedVideos : [],
       message: videos.length ? undefined : "No videos found for this user"
     });
   } catch (error) {
