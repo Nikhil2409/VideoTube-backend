@@ -17,13 +17,35 @@ const app = express()
 // Create HTTP server using the Express app
 const httpServer = createServer(app)
 
+// Get allowed origins from environment or use defaults
+const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:3900").split(',');
+console.log("Allowed CORS origins:", allowedOrigins);
+
+// CORS configuration - UPDATED to be more robust
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if the origin is in our allowedOrigins list
+    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
+      callback(null, true);
+    } else {
+      console.log("Blocked origin:", origin, "Allowed origins:", allowedOrigins);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
 // Initialize Socket.IO with the HTTP server
 const io = new Server(httpServer, {
-  cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3900",
-    credentials: true,
-    methods: ["GET", "POST"]
-  }
+  cors: corsOptions
 })
 
 cron.schedule('*/1 * * * *', async () => {
@@ -33,8 +55,6 @@ cron.schedule('*/1 * * * *', async () => {
   await flushTweetViewCountsToDB();
 });
 
-// CORS and other middleware setup
-console.log(process.env.CORS_ORIGIN);
 app.use(cors({
     origin: process.env.CORS_ORIGIN || "http://localhost:3900",
     credentials: true 
@@ -43,6 +63,9 @@ app.use(express.json({limit: "16kb"}))
 app.use(express.urlencoded({extended: true, limit: "16kb"}))
 app.use(express.static("public"))
 app.use(cookieParser())
+
+// Special route to handle preflight requests explicitly
+app.options('*', cors(corsOptions));
 
 // Routes import
 import userRouter from './routes/user.routes.js'
@@ -65,9 +88,19 @@ app.use("/api/v1/comments", commentRouter)
 app.use("/api/v1/likes", likeRouter)
 app.use("/api/v1/playlist", playlistRouter)
 app.use("/api/v1/dashboard", dashboardRouter)
+
+// Make sure the QUEUE_URL is defined before using it
+const QUEUE_URL = process.env.QUEUE_URL;
+
 app.get('/api/v1/queue-status', async (req, res) => {
   try {
-    const { Attributes } = await SQSClient.send(new GetQueueAttributesCommand({
+    if (!QUEUE_URL) {
+      return res.status(500).json({ error: "Queue URL not configured" });
+    }
+    
+    const sqsClient = new SQSClient({ region: process.env.AWS_REGION || 'us-east-1' });
+    
+    const { Attributes } = await sqsClient.send(new GetQueueAttributesCommand({
       QueueUrl: QUEUE_URL,
       AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
     }));
