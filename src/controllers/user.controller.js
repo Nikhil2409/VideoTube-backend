@@ -6,7 +6,7 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import UserTokenService from "../utils/Auth.utils.js";
 import { inspectUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
-import { ApiError } from "../utils/ApiError.js";
+import { ApiError } from "../utils/apiError.js";
 import { OAuth2Client } from 'google-auth-library';
 import dotenv from "dotenv";
 import axios from 'axios';
