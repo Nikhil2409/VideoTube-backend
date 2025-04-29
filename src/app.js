@@ -21,7 +21,7 @@ const httpServer = createServer(app)
 // Initialize Socket.IO with the HTTP server
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.CORS_ORIGIN || "http://localhost:3900",
     credentials: true,
     methods: ["GET", "POST"]
   }
@@ -36,7 +36,7 @@ cron.schedule('*/1 * * * *', async () => {
 
 // CORS and other middleware setup
 app.use(cors({
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.CORS_ORIGIN || "http://localhost:3900",
     credentials: true 
 }))
 app.use(express.json({limit: "16kb"}))
