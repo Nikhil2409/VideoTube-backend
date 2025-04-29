@@ -685,13 +685,15 @@ const loginUser = asyncHandler(async (req, res) => {
     
     const results = await pipeline.exec();
     
-    // Set cookies
+    // FIXED COOKIE SETTINGS for cross-domain requests
     const options = {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Lax",
+      httpOnly: true, // Changed to true for better security
+      secure: true, // Always true when using SameSite=None
+      sameSite: "none", // Changed from "Lax" to "none" for cross-domain requests
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     };
+    
+    console.log("Setting cookies with options:", options);
     
     return res
       .status(200)
@@ -763,7 +765,6 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 });
 
-// Logout controller
 const logoutUser = asyncHandler(async (req, res) => {
   await prisma.user.update({
     where: { id: req.user.id },
@@ -773,12 +774,15 @@ const logoutUser = asyncHandler(async (req, res) => {
   // Invalidate cache
   await invalidateUserCache(req.user.id);
   
-  // Clear cookies
+  // FIXED COOKIE SETTINGS for cross-domain cookie clearing
   const options = {
-    httpOnly: false,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "Lax"
+    httpOnly: true,
+    secure: true, // Always true when using SameSite=None
+    sameSite: "none", // Set to "none" for cross-domain requests
+    maxAge: 0 // Expire immediately
   };
+  
+  console.log("Clearing cookies with options:", options);
   
   return res
     .status(200)
@@ -786,7 +790,6 @@ const logoutUser = asyncHandler(async (req, res) => {
     .clearCookie("refreshToken", options)
     .json(new ApiResponse(200, {}, "User logged out"));
 });
-
 const refreshAccessToken = asyncHandler(async (req, res) => {
   const incomingRefreshToken =
     req.cookies.refreshToken || req.body.refreshToken;
@@ -813,10 +816,15 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       throw new ApiError(401, "Refresh token is expired or used");
     }
 
+    // FIXED COOKIE SETTINGS for cross-domain requests
     const options = {
       httpOnly: true,
-      secure: true,
+      secure: true, // Always true when using SameSite=None
+      sameSite: "none", // Set to "none" for cross-domain requests
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     };
+
+    console.log("Setting refreshed cookies with options:", options);
 
     const { accessToken, refreshToken: newRefreshToken } =
       await generateAccessAndRefereshTokens(user.id);
@@ -825,6 +833,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
         where: { id: user.id },
         data: { refreshToken: newRefreshToken }
      });
+    
     return res
       .status(200)
       .cookie("accessToken", accessToken, options)
