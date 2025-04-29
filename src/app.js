@@ -21,7 +21,6 @@ const httpServer = createServer(app)
 const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:3900").split(',');
 console.log("Allowed CORS origins:", allowedOrigins);
 
-// CORS configuration - UPDATED to be more robust
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl requests)
@@ -35,9 +34,22 @@ const corsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  credentials: true, // CRITICAL: This allows cookies to be sent and received
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With', 
+    'Accept', 
+    'Origin', 
+    'Access-Control-Request-Method', 
+    'Access-Control-Request-Headers',
+    'x-access-token',
+    'Cache-Control',
+    'Pragma',
+    'Expires'
+  ],
+  exposedHeaders: ['Content-Length', 'X-Total-Count', 'Content-Range']
 };
 
 // Apply CORS middleware
