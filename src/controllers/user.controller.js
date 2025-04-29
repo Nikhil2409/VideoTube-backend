@@ -1,12 +1,12 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/apiResponse.js";
-import { ApiError } from "../utils/ApiError.js";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import UserTokenService from "../utils/Auth.utils.js";
-import { inspectUserData, deleteSpecificUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
+import { inspectUserData, getDatabaseName } from "../../src/utils/prismaUtils.js";
+import { ApiError } from "../utils/ApiError.js";
 import { OAuth2Client } from 'google-auth-library';
 import dotenv from "dotenv";
 import axios from 'axios';
