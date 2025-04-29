@@ -55,10 +55,6 @@ cron.schedule('*/1 * * * *', async () => {
   await flushTweetViewCountsToDB();
 });
 
-app.use(cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:3900",
-    credentials: true 
-}))
 app.use(express.json({limit: "16kb"}))
 app.use(express.urlencoded({extended: true, limit: "16kb"}))
 app.use(express.static("public"))
