@@ -28,12 +28,10 @@ app.use(
 
 connectDB()
   .then(() => {
-    // Use httpServer instead of app.listen
     httpServer.listen(port, () => {
-      console.log(`Server is running at port number ${port}`);
-      console.log(`Socket.IO server is ready for connections`);
+      const deployedUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
+      console.log(`🚀 Server is running at: ${deployedUrl}`);
+      console.log(`📡 Listening on port: ${port}`);
+      console.log(`🧩 Socket.IO server is ready for connections`);
     });
-  })
-  .catch((err) => {
-    console.log("MongoDB connection error", err);
   });

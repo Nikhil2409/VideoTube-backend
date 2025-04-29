@@ -6,6 +6,11 @@ import { Server } from "socket.io"
 import cron from "node-cron"
 import { flushVideoViewCountsToDB, flushTweetViewCountsToDB } from "./utils/dbUpdates.js"
 import { SQSClient, GetQueueAttributesCommand } from "@aws-sdk/client-sqs";
+import dotenv from "dotenv";
+
+// Fix dotenv loading
+dotenv.config();
+
 
 // Initialize Express app
 const app = express()
@@ -16,7 +21,7 @@ const httpServer = createServer(app)
 // Initialize Socket.IO with the HTTP server
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: process.env.FRONTEND_URL,
     credentials: true,
     methods: ["GET", "POST"]
   }
@@ -31,7 +36,7 @@ cron.schedule('*/1 * * * *', async () => {
 
 // CORS and other middleware setup
 app.use(cors({
-    origin: "http://localhost:3000",
+    origin: process.env.FRONTEND_URL,
     credentials: true 
 }))
 app.use(express.json({limit: "16kb"}))
@@ -62,7 +67,7 @@ app.use("/api/v1/playlist", playlistRouter)
 app.use("/api/v1/dashboard", dashboardRouter)
 app.get('/api/v1/queue-status', async (req, res) => {
   try {
-    const { Attributes } = await sqsClient.send(new GetQueueAttributesCommand({
+    const { Attributes } = await SQSClient.send(new GetQueueAttributesCommand({
       QueueUrl: QUEUE_URL,
       AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
     }));
