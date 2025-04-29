@@ -22,10 +22,10 @@ const io = new Server(httpServer, {
   }
 })
 
-cron.schedule('*/2 * * * *', async () => {
-  console.log('Running scheduled view count flush to database...');
+cron.schedule('*/1 * * * *', async () => {
+  //console.log('Running scheduled view count flush to database...');
   await flushVideoViewCountsToDB();
-  console.log('Running scheduled tweet view count flush to database...');
+  //console.log('Running scheduled tweet view count flush to database...');
   await flushTweetViewCountsToDB();
 });
 
