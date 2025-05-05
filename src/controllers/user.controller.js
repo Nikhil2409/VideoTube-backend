@@ -666,11 +666,11 @@ const loginUser = asyncHandler(async (req, res) => {
     const pipeline = redisClient.multi();
     
      // Get subscriber count
-     const subscribersCountKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`;
+     const subscribersCountKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${response.user.id}`;
     pipeline.get(subscribersCountKey);
     
     // Get subscribed count
-    const subscriptionsCountKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}`;
+    const subscriptionsCountKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${response.user.id}`;
     pipeline.get(subscriptionsCountKey);
     
     const results = await pipeline.exec();
