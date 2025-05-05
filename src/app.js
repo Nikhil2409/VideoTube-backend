@@ -123,60 +123,86 @@ app.get('/api/v1/queue-status', async (req, res) => {
   }
 });
 
-// Keep track of online users
-const onlineUsers = new Map(); // userId -> {username, socketId}
+// Track users and their rooms
+const onlineUsers = new Map(); // userId -> {username, socketId, currentRoom}
+const roomMembers = new Map(); // roomId -> Set of userIds
 
 // Socket.IO event handlers
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id)
   
   // Store user information when they connect
-  const userId = socket.handshake.query.userId;
+  const userId = socket.handshake.query.userId || socket.id;
   const username = socket.handshake.query.username || "User";
+  const initialRoom = socket.handshake.query.currentRoom || null;
   
-  if (userId) {
-    onlineUsers.set(userId, { socketId: socket.id, username });
-    
-    // Broadcast updated online users list to all connected clients
-    broadcastOnlineUsers();
+  // Store user in our tracking map
+  onlineUsers.set(userId, { socketId: socket.id, username, currentRoom: null });
+  
+  // If user specified an initial room, join them to it
+  if (initialRoom) {
+    joinUserToRoom(userId, initialRoom);
   }
+  
+  // Broadcast updated online users list to all connected clients
+  broadcastOnlineUsers();
   
   // Handle public room events
   socket.on("join-room", (roomId) => {
-    socket.join(roomId);
-    console.log(`User ${socket.id} joined room: ${roomId}`);
+    // Normalize room ID to prevent case sensitivity issues
+    const normalizedRoomId = roomId.toLowerCase();
+    
+    socket.join(normalizedRoomId);
+    console.log(`User ${socket.id} (${username}) joined room: ${normalizedRoomId}`);
+    
+    // Update room membership
+    joinUserToRoom(userId, normalizedRoomId);
     
     // Broadcast to everyone in the room that a new user has joined
-    io.to(roomId).emit("user-joined", {
-      userId: userId || socket.id,
+    io.to(normalizedRoomId).emit("user-joined", {
+      userId: userId,
       username: username,
-      roomId: roomId,
+      roomId: normalizedRoomId,
       timestamp: new Date().toISOString()
     });
+    
+    // Send updated room count to all clients in the room
+    broadcastRoomCount(normalizedRoomId);
   });
   
   socket.on("leave-room", (roomId) => {
-    socket.leave(roomId);
-    console.log(`User ${socket.id} left room: ${roomId}`);
+    // Normalize room ID
+    const normalizedRoomId = roomId.toLowerCase();
+    
+    socket.leave(normalizedRoomId);
+    console.log(`User ${socket.id} (${username}) left room: ${normalizedRoomId}`);
+    
+    // Update room membership
+    removeUserFromRoom(userId, normalizedRoomId);
     
     // Broadcast to everyone in the room that a user has left
-    io.to(roomId).emit("user-left", {
-      userId: userId || socket.id,
+    io.to(normalizedRoomId).emit("user-left", {
+      userId: userId,
       username: username,
-      roomId: roomId,
+      roomId: normalizedRoomId,
       timestamp: new Date().toISOString()
     });
+    
+    // Send updated room count to all clients in the room
+    broadcastRoomCount(normalizedRoomId);
   });
   
   socket.on("send-message", (data) => {
-    // Broadcast to specific room if roomId is provided
+    // If roomId provided, broadcast to room
     if (data.roomId) {
-      socket.to(data.roomId).emit("receive-message", {
+      const normalizedRoomId = data.roomId.toLowerCase();
+      
+      socket.to(normalizedRoomId).emit("receive-message", {
         content: data.content,
         senderId: data.senderId,
         senderName: data.senderName,
         timestamp: new Date(),
-        roomId: data.roomId
+        roomId: normalizedRoomId
       });
     } else {
       // Broadcast to all clients except sender
@@ -189,7 +215,7 @@ io.on("connection", (socket) => {
     }
   });
   
-  // New event handler for private messages
+  // Private messages
   socket.on("private-message", (data) => {
     const { receiverId, content, senderId, senderName } = data;
     const receiverData = onlineUsers.get(receiverId);
@@ -222,14 +248,16 @@ io.on("connection", (socket) => {
     }
   });
   
-  // Updated typing event to handle both room and private typing indicators
+  // Typing indicators
   socket.on("typing", (data) => {
     if (data.roomId) {
       // Room typing indicator
-      socket.to(data.roomId).emit("user-typing", {
+      const normalizedRoomId = data.roomId.toLowerCase();
+      
+      socket.to(normalizedRoomId).emit("user-typing", {
         userId: data.userId,
         username: data.username,
-        roomId: data.roomId,
+        roomId: normalizedRoomId,
         isTyping: data.isTyping
       });
     } else if (data.receiverId) {
@@ -246,33 +274,148 @@ io.on("connection", (socket) => {
     }
   });
   
-  // Handle client requests for online users list
+  // Send online users list to requesting client
   socket.on("get-online-users", () => {
     socket.emit("online-users", getOnlineUsersArray());
+  });
+  
+  // Handle client requests for room count
+  socket.on("get-room-count", (roomId) => {
+    const normalizedRoomId = roomId.toLowerCase();
+    const count = getRoomMemberCount(normalizedRoomId);
+    
+    socket.emit("room-count", {
+      roomId: normalizedRoomId,
+      count: count
+    });
   });
   
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
     
-    // Remove user from online users map
-    if (userId) {
-      onlineUsers.delete(userId);
+    // Get user data before removing
+    const userData = onlineUsers.get(userId);
+    const userRoom = userData ? userData.currentRoom : null;
+    
+    // If the user was in a room, remove them and notify room members
+    if (userRoom) {
+      removeUserFromRoom(userId, userRoom);
       
-      // Broadcast updated online users list
-      broadcastOnlineUsers();
+      io.to(userRoom).emit("user-left", {
+        userId: userId,
+        username: username,
+        roomId: userRoom,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Send updated room count to all clients in the room
+      broadcastRoomCount(userRoom);
     }
+    
+    // Remove user from online users map
+    onlineUsers.delete(userId);
+    
+    // Broadcast updated online users list
+    broadcastOnlineUsers();
   });
   
-  // Helper function to broadcast online users to all clients
-  function broadcastOnlineUsers() {
-    io.emit("online-users", getOnlineUsersArray());
+  // HELPER FUNCTIONS
+  
+  // Add a user to a room and update tracking
+  function joinUserToRoom(userId, roomId) {
+    // Normalize room ID
+    const normalizedRoomId = roomId.toLowerCase();
+    
+    // Remove user from previous room if any
+    const userData = onlineUsers.get(userId);
+    if (userData && userData.currentRoom) {
+      removeUserFromRoom(userId, userData.currentRoom);
+    }
+    
+    // Update user data with new room
+    if (userData) {
+      userData.currentRoom = normalizedRoomId;
+      onlineUsers.set(userId, userData);
+    }
+    
+    // Add user to room members set
+    if (!roomMembers.has(normalizedRoomId)) {
+      roomMembers.set(normalizedRoomId, new Set());
+    }
+    roomMembers.get(normalizedRoomId).add(userId);
+    
+    // Broadcast updated data
+    broadcastOnlineUsers();
+    broadcastRoomCount(normalizedRoomId);
+    
+    console.log(`Room ${normalizedRoomId} now has ${getRoomMemberCount(normalizedRoomId)} members`);
   }
   
-  // Helper function to convert Map to array of user objects
+  // Remove a user from a room and update tracking
+  function removeUserFromRoom(userId, roomId) {
+    // Normalize room ID
+    const normalizedRoomId = roomId.toLowerCase();
+    
+    // Update user data to remove room
+    const userData = onlineUsers.get(userId);
+    if (userData && userData.currentRoom === normalizedRoomId) {
+      userData.currentRoom = null;
+      onlineUsers.set(userId, userData);
+    }
+    
+    // Remove user from room members set
+    if (roomMembers.has(normalizedRoomId)) {
+      roomMembers.get(normalizedRoomId).delete(userId);
+      
+      // Clean up empty rooms
+      if (roomMembers.get(normalizedRoomId).size === 0) {
+        roomMembers.delete(normalizedRoomId);
+      }
+    }
+    
+    // Broadcast updated data
+    broadcastOnlineUsers();
+    if (roomMembers.has(normalizedRoomId)) {
+      broadcastRoomCount(normalizedRoomId);
+    }
+  }
+  
+  // Get count of members in a room
+  function getRoomMemberCount(roomId) {
+    // Normalize room ID
+    const normalizedRoomId = roomId.toLowerCase();
+    
+    return roomMembers.has(normalizedRoomId) 
+      ? roomMembers.get(normalizedRoomId).size 
+      : 0;
+  }
+  
+  // Send room count to all clients in the room
+  function broadcastRoomCount(roomId) {
+    // Normalize room ID
+    const normalizedRoomId = roomId.toLowerCase();
+    
+    const count = getRoomMemberCount(normalizedRoomId);
+    console.log(`Broadcasting room count for ${normalizedRoomId}: ${count} members`);
+    
+    io.to(normalizedRoomId).emit("room-count", {
+      roomId: normalizedRoomId,
+      count: count
+    });
+  }
+  
+  // Broadcast online users list to all clients
+  function broadcastOnlineUsers() {
+    const users = getOnlineUsersArray();
+    io.emit("online-users", users);
+  }
+  
+  // Convert online users map to array for clients
   function getOnlineUsersArray() {
     return Array.from(onlineUsers).map(([userId, data]) => ({
       userId,
-      username: data.username
+      username: data.username,
+      currentRoom: data.currentRoom
     }));
   }
 });
