@@ -3,6 +3,7 @@ import amqp from "amqplib";
 import redisClient from "../config/redis.js";
 import { REDIS_KEYS } from "../constants/redisKeys.js";
 import dotenv from "dotenv";
+import { ownedById } from "../controllers/video.controller.js";
 
 dotenv.config();
 
@@ -33,7 +34,7 @@ async function processSubscriptionQueue() {
       if (!message) return;
       
       try {
-        const { action, userId, subscriberId, username, timestamp } = JSON.parse(message.content.toString());
+        const { action, userId, subscriberId} = JSON.parse(message.content.toString());
         
         console.log(`Processing ${action} for userId: ${userId} by subscriberId: ${subscriberId}`);
         
@@ -56,7 +57,7 @@ async function processSubscriptionQueue() {
               }
             });
           }
-        } else { // UNSUBSCRIBE
+        } else { 
           const existingSubscription = await prisma.subscription.findUnique({
             where: {
               subscriberId_userId: {
@@ -81,20 +82,13 @@ async function processSubscriptionQueue() {
           select: { username: true }
         });
         
-        // Clear ALL related caches - more aggressive approach
-        // Clear subscriber's subscription list
-        await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}`);
         
-        // Clear channel owner's subscriber list
-        await redisClient.del(`${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`);
+        await redisClient.del(
+          `${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${subscriberId}_${userId}`,
+        );
+        console.log(`${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${subscriberId}_${userId}`);
         
-        // Clear user profiles
-        await redisClient.del(`${REDIS_KEYS.USER}${username}`);
-        if (subscriber) {
-          await redisClient.del(`${REDIS_KEYS.USER}${subscriber.username}`);
-        }
-        
-        // Clear all paginated caches
+        // Get all related users for cache invalidation
         const allPaginationKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIPTIONS}*`);
         const allSubscriberKeys = await redisClient.keys(`${REDIS_KEYS.USER_SUBSCRIBERS}*`);
         
@@ -103,29 +97,84 @@ async function processSubscriptionQueue() {
         }
         if (allSubscriberKeys.length > 0) {
           await redisClient.del(allSubscriberKeys);
-        }
-        
-        // Update subscriber count caches
-        const totalSubscribers = await prisma.subscription.count({
-          where: { userId: userId }
+        } 
+
+        const isSubscribed = await prisma.subscription.findUnique({
+          where: {
+            subscriberId_userId: {
+              subscriberId: subscriberId,
+              userId: userId
+            }
+          }
         });
-        
+
         await redisClient.set(
-          `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_count`,
-          totalSubscribers.toString(),
-          { EX: 3600 }
+          `${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${subscriberId}_${userId}`,
+          isSubscribed ? "true" : "false",
+          {EX: 3600}
         );
         
-        const totalSubscriptions = await prisma.subscription.count({
-          where: { subscriberId: subscriberId }
+        // Get all related users for cache invalidation
+        const subscriptions = await prisma.subscription.findMany({
+          where: { userId: userId },
+          include: {
+            subscriber: {
+              select: {
+                id: true,
+                username: true,
+                fullName: true,
+                avatar: true
+              }
+            }
+          }
         });
+    
+        const subscribers = subscriptions.map(sub => ({
+          id: sub.subscriber.id,
+          username: sub.subscriber.username,
+          fullName: sub.subscriber.fullName,
+          avatar: sub.subscriber.avatar,
+          subscribedAt: sub.createdAt
+        }));
         
+        const subscriberCacheKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`;
+
         await redisClient.set(
-          `${REDIS_KEYS.USER_SUBSCRIPTIONS}${subscriberId}_count`,
-          totalSubscriptions.toString(),
-          { EX: 3600 }
+          subscriberCacheKey,
+          JSON.stringify(subscribers),
+          {EX: 3600}
         );
+
+        const subs = await prisma.subscription.findMany({
+          where: { subscriberId: userId },
+          include: {
+            subscriber: {
+              select: {
+                id: true,
+                username: true,
+                fullName: true,
+                avatar: true
+              }
+            }
+          }
+        });
+    
+        const sub = subs.map(sub => ({
+          id: sub.subscriber.id,
+          username: sub.subscriber.username,
+          fullName: sub.subscriber.fullName,
+          avatar: sub.subscriber.avatar,
+          subscribedAt: sub.createdAt
+        }));
         
+        const subscriptionCacheKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}`;
+
+        await redisClient.set(
+          subscriptionCacheKey,
+          JSON.stringify(sub),
+          {EX: 3600}
+        );
+
         // Acknowledge the message - removes it from the queue
         channel.ack(message);
         

@@ -44,13 +44,6 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
   }
 });
 
-// Helper function to get Redis view count for a video
-const getRedisViewCount = async (videoId) => {
-  const viewKey = `${REDIS_KEYS.VIDEO_VIEWS}${videoId}`;
-  const count = await redisClient.get(viewKey);
-  return count ? parseInt(count) : 0;
-};
-
 // Helper function to enrich video objects with Redis view counts
 const enrichVideosWithViewCounts = async (videos) => {
   if (!videos || videos.length === 0) return videos;

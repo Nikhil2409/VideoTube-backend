@@ -178,14 +178,7 @@ const getUserChannelSubscribers = asyncHandler(async (req, res) => {
       JSON.stringify(responseData),
       {EX: 3600}
     );
-
-    // Also cache the total subscribers count separately for quick access
-    await redisClient.set(
-      `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}_count`,
-      totalSubscribers.toString(),
-      {EX: 3600}
-    );
-
+    
     return res.status(200).json(
       new ApiResponse(
         200, 
@@ -275,13 +268,6 @@ const getSubscribedChannels = asyncHandler(async (req, res) => {
     await redisClient.set(
       cacheKey,
       JSON.stringify(responseData),
-      {EX: 3600}
-    );
-    
-    // Also cache the total subscriptions count separately
-    await redisClient.set(
-      `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}_count`,
-      totalSubscriptions.toString(),
       {EX: 3600}
     );
     

@@ -11,8 +11,6 @@ export const REDIS_KEYS = {
   USER_PLAYLISTS: "user_playlists:",
   USER_SUBSCRIPTIONS: "user_subscriptions:",
   USER_SUBSCRIBERS: "user_subscribers:",
-  USER_SUBSCRIBERS_COUNT: "user_subscribers_count:",
-  USER_SUBSCRIPTIONS_COUNT: "user_subscriptions_count:",
   USER_WATCH_HISTORY: "user_watch_history:",
   USER_VIDEOS_BY_USERNAME: "user_videos_by_username:",
   USER_SUBSCRIPTION_STATE: "user_subscription_state:",
