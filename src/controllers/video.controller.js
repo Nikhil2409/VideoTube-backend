@@ -8,6 +8,7 @@ import { PrismaClient } from '@prisma/client';
 import ffmpeg from 'fluent-ffmpeg';
 import redisClient from "../config/redis.js";
 import { REDIS_KEYS } from "../constants/redisKeys.js";
+import { subscribe } from "diagnostics_channel";
 
 const prisma = new PrismaClient();
 
@@ -142,9 +143,17 @@ const getVideoById = asyncHandler(async (req, res) => {
         const ownerId = videoResponse.owner.id;
         const cachedSubStatus = await redisClient.get(`${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${userId}_${ownerId}`);
         const cachedSubCount = await redisClient.get(`${REDIS_KEYS.USER_SUBSCRIBERS}${ownerId}`);
+        let subscribers = 0;
+        if(!cachedSubCount){
+           subscribers = await prisma.subscription.count({
+            where: {
+              userId: ownerId
+            }
+          });
+        } 
         
         const userSubscriptionStatus = cachedSubStatus === "true";
-        const userSubscribersCount = cachedSubCount ? JSON.parse(cachedSubCount).length : 0;
+        const userSubscribersCount = cachedSubCount ? JSON.parse(cachedSubCount).length : subscribers;
     
         videoResponse.owner.isSubscribed = userSubscriptionStatus;
         videoResponse.owner.subscribersCount = userSubscribersCount;
