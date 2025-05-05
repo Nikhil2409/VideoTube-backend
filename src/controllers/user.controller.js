@@ -242,12 +242,12 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     pipeline.get(userKey);
     
     // Get subscriber count
-    const subscribersCountKey = `${REDIS_KEYS.USER_SUBSCRIBERS_COUNT}${userId}`;
+    const subscribersCountKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`;
     pipeline.get(subscribersCountKey);
     
     // Get subscribed count
-    const channelsSubscribedToCountKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS_COUNT}${userId}`;
-    pipeline.get(channelsSubscribedToCountKey);
+    const subscriptionsCountKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}`;
+    pipeline.get(subscriptionsCountKey);
     
     // Get subscription state if needed
     let subscriptionCacheKey = null;
@@ -260,8 +260,8 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
     const results = await pipeline.exec();
     
     const cachedUser = results[0] ? JSON.parse(results[0]) : null;
-    const cachedSubscribersCount = results[1] ? parseInt(results[1]) : null;
-    const cachedSubscribedCount = results[2] ? parseInt(results[2]) : null;
+    const cachedSubscribersCount = results[1] ? JSON.parse(results[1]).length : null;
+    const cachedSubscribedCount = results[2] ? JSON.parse(results[2]).length : null;    
     const cachedIsSubscribed = subscriptionCacheKey ? (results[3] === "true") : false;
     
     // We have everything in cache
@@ -351,17 +351,7 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
       const cacheableProfile = {...user};
       updatePipeline.set(userKey, JSON.stringify(cacheableProfile), {EX: CACHE_TTL.USER});
     }
-    
-    // Cache subscriber counts
-    if (cachedSubscribersCount === null) {
-      updatePipeline.set(subscribersCountKey, subscribersCount, {EX: CACHE_TTL.SUBSCRIPTION});
-    }
-    
-    // Cache subscription counts
-    if (cachedSubscribedCount === null) {
-      updatePipeline.set(channelsSubscribedToCountKey, channelsSubscribedToCount, {EX: CACHE_TTL.SUBSCRIPTION});
-    }
-    
+        
     // Execute cache updates if needed
     await updatePipeline.exec();
     
@@ -675,12 +665,12 @@ const loginUser = asyncHandler(async (req, res) => {
     // Warm frequently accessed related data
     const pipeline = redisClient.multi();
     
-    // Cache subscriber count
-    const subscribersCountKey = `${REDIS_KEYS.USER_SUBSCRIBERS_COUNT}${response.user.id}`;
+     // Get subscriber count
+     const subscribersCountKey = `${REDIS_KEYS.USER_SUBSCRIBERS}${userId}`;
     pipeline.get(subscribersCountKey);
     
-    // Cache subscription count
-    const subscriptionsCountKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS_COUNT}${response.user.id}`;
+    // Get subscribed count
+    const subscriptionsCountKey = `${REDIS_KEYS.USER_SUBSCRIPTIONS}${userId}`;
     pipeline.get(subscriptionsCountKey);
     
     const results = await pipeline.exec();

@@ -3,7 +3,6 @@ import { ApiError } from "../utils/apiError.js";
 import { ApiResponse } from "../utils/apiResponse.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import fs from "fs";
-import path from "path";
 import { cloudinary } from "../utils/cloudinary.js";
 import { PrismaClient } from '@prisma/client';
 import ffmpeg from 'fluent-ffmpeg';
@@ -135,18 +134,30 @@ const getVideoById = asyncHandler(async (req, res) => {
     
     // Check if video exists in Redis cache
     const cachedVideo = await redisClient.get(cacheKey);
-    
+
     if (cachedVideo) {
-      const videoData = JSON.parse(cachedVideo);
-      
-      // Get Redis view count and add to cached video data
+      const videoResponse = JSON.parse(cachedVideo);
+    
+      if (videoResponse.owner?.id && userId && userId !== videoResponse.owner.id) {
+        const ownerId = videoResponse.owner.id;
+        const cachedSubStatus = await redisClient.get(`${REDIS_KEYS.USER_SUBSCRIPTION_STATE}${userId}_${ownerId}`);
+        const cachedSubCount = await redisClient.get(`${REDIS_KEYS.USER_SUBSCRIBERS}${ownerId}`);
+        
+        const userSubscriptionStatus = cachedSubStatus === "true";
+        const userSubscribersCount = cachedSubCount ? JSON.parse(cachedSubCount).length : 0;
+    
+        videoResponse.owner.isSubscribed = userSubscriptionStatus;
+        videoResponse.owner.subscribersCount = userSubscribersCount;
+      }
+    
       const redisViews = await getRedisViewCount(videoId);
-      videoData.views = videoData.views + redisViews;
-      
+      videoResponse.views = (videoResponse.views || 0) + redisViews;
+
       return res
-        .status(200)
-        .json(new ApiResponse(200, videoData, "Video fetched from cache"));
+      .status(200)
+      .json(new ApiResponse(200, videoResponse, "Videos fetched successfully"));
     }
+    
     
     // Cache miss - find the video by ID using Prisma
     const video = await prisma.video.findUnique({
@@ -261,8 +272,8 @@ const getVideoById = asyncHandler(async (req, res) => {
 
     // Return the video with all necessary information
     return res
-      .status(200)
-      .json(new ApiResponse(200, videoResponse, "Video fetched successfully"));
+    .status(200)
+    .json(new ApiResponse(200, videoResponse, "Videos fetched successfully"));
       
   } catch (error) {
     if (error.code === 'P2023') {
