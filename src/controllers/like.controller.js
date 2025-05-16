@@ -23,18 +23,12 @@ const toggleVideoLike = asyncHandler(async (req, res) => {
 
     if (existingLike) {
       await prisma.like.delete({ where: { id: existingLike.id } });
-      await redisClient.del(`${REDIS_KEYS.VIDEO_LIKES}${videoId}`);
       await redisClient.del(`${REDIS_KEYS.USER_VIDEO_LIKES}${userId}`);
-      // Clear the video cache as well
-      await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}:user:${userId}`);
       await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
       return res.status(200).json(new ApiResponse(200, { liked: false }, "Unliked successfully"));
     } else {
       await prisma.like.create({ data: { likedBy: userId, videoId } });
-      await redisClient.del(`${REDIS_KEYS.VIDEO_LIKES}${videoId}`);
       await redisClient.del(`${REDIS_KEYS.USER_VIDEO_LIKES}${userId}`);
-      // Clear the video cache as well
-      await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}:user:${userId}`);
       await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
       return res.status(200).json(new ApiResponse(200, { liked: true }, "Liked successfully"));
     }
@@ -145,11 +139,14 @@ const toggleTweetLike = asyncHandler(async (req, res) => {
 
     if (existingLike) {
       await prisma.like.delete({ where: { id: existingLike.id } });
-      await redisClient.del(`${REDIS_KEYS.TWEET_LIKES}${tweetId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${userId}`);
+      await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
       return res.status(200).json(new ApiResponse(200, { liked: false }, "Unliked successfully"));
+
     } else {
       await prisma.like.create({ data: { likedBy: userId, tweetId } });
-      await redisClient.del(`${REDIS_KEYS.TWEET_LIKES}${tweetId}`);
+      await redisClient.del(`${REDIS_KEYS.USER_TWEET_LIKES}${userId}`);
+      await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
       return res.status(200).json(new ApiResponse(200, { liked: true }, "Liked successfully"));
     }
   } catch (error) {
@@ -221,17 +218,39 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
   try {
-    const existingLike = await prisma.like.findFirst({ where: { likedBy: userId, commentId } });
+    const existingLike = await prisma.like.findFirst({
+      where: { likedBy: userId, commentId }
+    });
+
+    const comment = await prisma.comment.findUnique({
+      where: { id: commentId },
+      select: {
+        videoId: true,
+        tweetId: true,
+      },
+    });
+
+    if (!comment) {
+      return res.status(404).json(new ApiResponse(404, null, "Comment not found"));
+    }
 
     if (existingLike) {
       await prisma.like.delete({ where: { id: existingLike.id } });
-      await redisClient.del(`${REDIS_KEYS.COMMENT_LIKES}${commentId}`);
-      return res.status(200).json(new ApiResponse(200, { liked: false }, "Unliked successfully"));
     } else {
       await prisma.like.create({ data: { likedBy: userId, commentId } });
-      await redisClient.del(`${REDIS_KEYS.COMMENT_LIKES}${commentId}`);
-      return res.status(200).json(new ApiResponse(200, { liked: true }, "Liked successfully"));
     }
+
+    await redisClient.del(`${REDIS_KEYS.USER_COMMENT_LIKES}${userId}`);
+
+    if (comment.videoId) {
+      await redisClient.del(`${REDIS_KEYS.VIDEO_COMMENTS}${comment.videoId}`);
+    }
+
+    if (comment.tweetId) {
+      await redisClient.del(`${REDIS_KEYS.TWEET_COMMENTS}${comment.tweetId}`);
+    }
+
+    return res.status(200).json(new ApiResponse(200, { liked: !existingLike }, existingLike ? "Unliked successfully" : "Liked successfully"));
   } catch (error) {
     console.error("Comment like toggle error:", error);
     return res.status(500).json(new ApiResponse(500, null, "Error toggling like"));

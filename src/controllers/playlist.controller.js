@@ -409,10 +409,6 @@ const updatePlaylist = asyncHandler(async (req, res) => {
   const { name, description } = req.body;
   const userId = req.user.id;
   
-  if (!playlistId || (!name && description === undefined)) {
-    throw new ApiError(400, "Playlist ID and at least one update field are required");
-  }
-
   try {
     // Check if playlist exists and belongs to user
     const playlist = await prisma.playlist.findUnique({

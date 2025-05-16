@@ -23,6 +23,9 @@ export const flushVideoViewCountsToDB = async () => {
               
               // Reset the Redis counter after successful update
               await redisClient.del(key);
+              
+              // Also invalidate the specific video cache to ensure fresh data on next fetch
+              await redisClient.del(`${REDIS_KEYS.VIDEO}${videoId}`);
             });
             
             console.log(`Flushed ${viewCount} views for video ${videoId}`);
@@ -31,6 +34,7 @@ export const flushVideoViewCountsToDB = async () => {
           }
         }
       }
+      await redisClient.del(`${REDIS_KEYS.ALL_VIDEOS}`); // Clear all video view keys after flushing
     } catch (err) {
       console.error("Error in view count flush operation:", err);
     }
@@ -56,6 +60,9 @@ export const flushVideoViewCountsToDB = async () => {
               
               // Reset the Redis counter after successful update
               await redisClient.del(key);
+              
+              // Also invalidate the specific tweet cache to ensure fresh data on next fetch
+              await redisClient.del(`${REDIS_KEYS.TWEET}${tweetId}`);
             });
             
             console.log(`Flushed ${viewCount} views for tweet ${tweetId}`);
@@ -64,6 +71,7 @@ export const flushVideoViewCountsToDB = async () => {
           }
         }
       }
+      await redisClient.del(`${REDIS_KEYS.ALL_TWEETS}`); // Clear all tweet view keys after flushing
     } catch (err) {
       console.error("Error in tweet view count flush operation:", err);
     }

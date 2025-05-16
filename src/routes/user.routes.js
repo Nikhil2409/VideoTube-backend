@@ -18,15 +18,7 @@ import {
 } from "../controllers/user.controller.js";
 import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
-import rateLimit from "express-rate-limit";
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Increased limit per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: "Too many authentication attempts, please try again later"
-});
 
 const router = Router();
 

@@ -761,10 +761,8 @@ const logoutUser = asyncHandler(async (req, res) => {
     data: { refreshToken: null }
   });
   
-  // Invalidate cache
   await invalidateUserCache(req.user.id);
   
-  // FIXED COOKIE SETTINGS for cross-domain cookie clearing
   const options = {
     httpOnly: true,
     secure: true, // Always true when using SameSite=None

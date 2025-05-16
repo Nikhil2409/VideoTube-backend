@@ -12,20 +12,14 @@ const CACHE_EXPIRATION = 60 * 60;
 const invalidateCommentCaches = async (commentId, videoId, tweetId, userId) => {
   const cachesToDelete = [];
   
-  // Specific comment cache
   if (commentId) {
     cachesToDelete.push(`${REDIS_KEYS.COMMENT}${commentId}`);
-    cachesToDelete.push(`${REDIS_KEYS.COMMENT_LIKES}${commentId}`);
   }
-  
-  // Video-related caches
+
   if (videoId) {
     const videoCachePattern = `${REDIS_KEYS.VIDEO_COMMENTS}${videoId}_*`;
     const videoKeys = await redisClient.keys(videoCachePattern);
     cachesToDelete.push(...videoKeys);
-    
-    // Invalidate video likes (as comment counts may be displayed with videos)
-    cachesToDelete.push(`${REDIS_KEYS.VIDEO_LIKES}${videoId}`);
     cachesToDelete.push(`${REDIS_KEYS.VIDEO}${videoId}`);
   }
   
@@ -34,28 +28,18 @@ const invalidateCommentCaches = async (commentId, videoId, tweetId, userId) => {
     const tweetCachePattern = `${REDIS_KEYS.TWEET_COMMENTS}${tweetId}_*`;
     const tweetKeys = await redisClient.keys(tweetCachePattern);
     cachesToDelete.push(...tweetKeys);
-    
-    // Invalidate tweet likes (as comment counts may be displayed with tweets)
-    cachesToDelete.push(`${REDIS_KEYS.TWEET_LIKES}${tweetId}`);
     cachesToDelete.push(`${REDIS_KEYS.TWEET}${tweetId}`);
   }
   
-  // User-related caches
   if (userId) {
-    // User's comments
     const userCommentsCachePattern = `${REDIS_KEYS.USER_COMMENTS}${userId}*`;
     const userCommentsKeys = await redisClient.keys(userCommentsCachePattern);
     cachesToDelete.push(...userCommentsKeys);
-    
-    // User's comment likes
     cachesToDelete.push(`${REDIS_KEYS.USER_COMMENT_LIKES}${userId}`);
-    
-    // User's video and tweet listings (as they may show comment counts)
     cachesToDelete.push(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
     cachesToDelete.push(`${REDIS_KEYS.USER_TWEETS}${userId}`);
   }
   
-  // Delete all gathered caches if any exist
   if (cachesToDelete.length > 0) {
     await redisClient.del(cachesToDelete);
   }
@@ -429,7 +413,7 @@ const getTweetComments = asyncHandler(async (req, res) => {
   const { tweetId } = req.params;
   const { page = 1, limit = 10 } = req.query;
   const skip = (parseInt(page) - 1) * parseInt(limit);
-  const userId = req.user?.id; // May be undefined for non-authenticated users
+  const userId = req.user?.id;
 
   if (!tweetId) {
     throw new ApiError(400, "Tweet ID is required");

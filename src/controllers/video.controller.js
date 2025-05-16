@@ -164,7 +164,7 @@ const getVideoById = asyncHandler(async (req, res) => {
 
       return res
       .status(200)
-      .json(new ApiResponse(200, videoResponse, "Videos fetched successfully"));
+      .json(new ApiResponse(200, videoResponse, "Videos fetched with user data"));
     }
     
     
@@ -351,23 +351,7 @@ const incrementViewCount = asyncHandler(async(req, res) => {
       ...video,
       views: video.views + parseInt(currentViews) // Include all Redis views
     };
-    
-    // Invalidate relevant caches
-    const keysToInvalidate = [
-      `${REDIS_KEYS.VIDEO}${videoId}`,
-      // Don't invalidate ALL_VIDEOS on every view - too expensive
-    ];
-    
-    // Only invalidate user-specific caches if user is authenticated
-    if (userId) {
-      keysToInvalidate.push(`${REDIS_KEYS.USER_WATCH_HISTORY}${userId}`);
-      keysToInvalidate.push(`${REDIS_KEYS.VIDEO}${videoId}:user:${userId}`); // Important: invalidate the user-specific video cache
-      keysToInvalidate.push(`${REDIS_KEYS.USER_VIDEOS}${userId}`);
-      keysToInvalidate.push(`${REDIS_KEYS.ALL_VIDEOS}`);
-      keysToInvalidate.push(`${REDIS_KEYS.USER_VIDEOS_BY_USERNAME}${video.user.username}`);
-    }
 
-    
     return res
       .status(200)
       .json(new ApiResponse(200, video, "View count incremented successfully"));  
@@ -598,7 +582,6 @@ const deleteVideo = asyncHandler(async (req, res) => {
     const keysToInvalidate = [
       `${REDIS_KEYS.VIDEO}${videoId}*`, // Pattern delete for all user variants
       `${REDIS_KEYS.VIDEO_COMMENTS}${videoId}`,
-      `${REDIS_KEYS.VIDEO_LIKES}${videoId}`,
       `${REDIS_KEYS.VIDEO_VIEWS}${videoId}`,
       REDIS_KEYS.ALL_VIDEOS,
       `${REDIS_KEYS.USER_VIDEOS}${userId}`,

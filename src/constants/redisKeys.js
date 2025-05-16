@@ -19,20 +19,14 @@ export const REDIS_KEYS = {
   // Video-related keys
   VIDEO: "video:",
   VIDEO_COMMENTS: "video_comments:",
-  VIDEO_LIKES: "video_likes:",
   ALL_VIDEOS: "all_videos",
   VIDEO_VIEWS: "video_views:",
   
   // Tweet-related keys
   TWEET: "tweet:",
   TWEET_COMMENTS: "tweet_comments:",
-  TWEET_LIKES: "tweet_likes:",
   ALL_TWEETS: "all_tweets",
   TWEET_VIEWS: "tweet_views:",
-  
-  // Comment-related keys
-  COMMENT: "comment:",
-  COMMENT_LIKES: "comment_likes:",
   
   // Playlist-related keys
   PLAYLIST: "playlist:",
