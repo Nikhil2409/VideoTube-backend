@@ -242,13 +242,23 @@ const toggleCommentLike = asyncHandler(async (req, res) => {
 
     await redisClient.del(`${REDIS_KEYS.USER_COMMENT_LIKES}${userId}`);
 
-    if (comment.videoId) {
-      await redisClient.del(`${REDIS_KEYS.VIDEO_COMMENTS}${comment.videoId}`);
-    }
+if (comment.videoId) {
+  await redisClient.del(`${REDIS_KEYS.VIDEO}${comment.videoId}`);
 
-    if (comment.tweetId) {
-      await redisClient.del(`${REDIS_KEYS.TWEET_COMMENTS}${comment.tweetId}`);
-    }
+  const videoKeys = await redisClient.keys(`${REDIS_KEYS.VIDEO_COMMENTS}${comment.videoId}_*`);
+  if (videoKeys.length > 0) {
+    await redisClient.del(...videoKeys);
+  }
+}
+
+if (comment.tweetId) {
+  await redisClient.del(`${REDIS_KEYS.TWEET}${comment.tweetId}`);
+
+  const tweetKeys = await redisClient.keys(`${REDIS_KEYS.TWEET_COMMENTS}${comment.tweetId}_*`);
+  if (tweetKeys.length > 0) {
+    await redisClient.del(...tweetKeys);
+  }
+}
 
     return res.status(200).json(new ApiResponse(200, { liked: !existingLike }, existingLike ? "Unliked successfully" : "Liked successfully"));
   } catch (error) {
